@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "entire-adapter"
+version = "0.1.0"
+description = "LangGraph and CrewAI adapter for Entire checkpoint tracking."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Suhaan" }
+]
+keywords = ["entire", "langgraph", "langchain", "crewai", "agents", "checkpoints"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Version Control :: Git",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+langgraph = ["langchain-core>=0.3", "langgraph>=0.2"]
+crewai = ["crewai>=0.100"]
+dev = ["build>=1.2", "pytest>=8", "twine>=5"]
+
+[project.scripts]
+entire-agent-entire-adapter = "entire_adapter.protocol:main"
+
+[project.urls]
+Homepage = "https://github.com/suhaanthayyil/entire-adapter"
+Repository = "https://github.com/suhaanthayyil/entire-adapter"
+Issues = "https://github.com/suhaanthayyil/entire-adapter/issues"
+
+[tool.setuptools.packages.find]
+include = ["entire_adapter*"]
+
+[tool.setuptools.package-data]
+entire_adapter = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

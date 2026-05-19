@@ -1,0 +1,25 @@
+.DS_Store
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local live-test output
+adapter_live_test/.venv/
+adapter_live_test/sandbox_repo.*/
+adapter_live_test/last_run.log
+
+# Entire/git local state
+.entire-adapter/
+.entire/
