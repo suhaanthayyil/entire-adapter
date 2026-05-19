@@ -54,6 +54,30 @@ python -m twine upload dist/*
 
 Use a PyPI API token owned by the maintainer account.
 
+## PyPI Trusted Publishing
+
+This repo also includes `.github/workflows/publish.yml`, which publishes on GitHub Release creation through PyPI Trusted Publishing.
+
+Configure a pending publisher on PyPI with:
+
+```text
+PyPI project name: entire-adapter
+Owner: suhaanthayyil
+Repository name: entire-adapter
+Workflow name: publish.yml
+Environment name: pypi
+```
+
+Then create a GitHub release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+gh release create v0.1.0 --title "entire-adapter 0.1.0" --notes-file CHANGELOG.md
+```
+
+The GitHub Action will build and publish the wheel/sdist to PyPI without storing a PyPI token in GitHub secrets.
+
 Install verification:
 
 ```bash
