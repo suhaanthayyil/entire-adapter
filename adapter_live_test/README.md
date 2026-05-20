@@ -21,7 +21,7 @@ printf "# Entire Adapter Sandbox\n" > README.md
 git add README.md
 git commit -m "initial sandbox commit"
 
-entire enable --agent entire-adapter --telemetry=false
+entire enable --agent langgraph --telemetry=false
 entire agent list
 
 python /Users/suhaan/Documents/Coding/entire/adapter_live_test/live_langgraph_agent.py "${SANDBOX_REPO}" | tee /Users/suhaan/Documents/Coding/entire/adapter_live_test/last_run.log
@@ -41,7 +41,7 @@ These commands will:
 1. Create a local virtual environment in `adapter_live_test/.venv`.
 2. Install this package with the LangGraph and test dependencies.
 3. Create a temporary sandbox Git repo under `adapter_live_test/sandbox_repo.*`.
-4. Enable Entire for the sandbox repo with `entire-adapter`.
+4. Enable Entire for the sandbox repo with `langgraph`.
 5. Run a LangGraph workflow that calls a LangChain tool.
 6. Write `agent_output.txt` through that tool.
 7. Commit the file change.

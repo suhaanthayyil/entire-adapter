@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "entire-adapter"
-version = "0.1.0"
+version = "0.2.0"
 description = "LangGraph and CrewAI adapter for Entire checkpoint tracking."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,6 +34,8 @@ dev = ["build>=1.2", "pytest>=8", "twine>=5"]
 
 [project.scripts]
 entire-agent-entire-adapter = "entire_adapter.protocol:main"
+entire-agent-langgraph = "entire_adapter.protocol:main_langgraph"
+entire-agent-crewai = "entire_adapter.protocol:main_crewai"
 
 [project.urls]
 Homepage = "https://github.com/suhaanthayyil/entire-adapter"

@@ -6,10 +6,12 @@ import base64
 import json
 import logging
 import os
+import queue
 import re
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import is_dataclass, asdict
 from datetime import datetime, timezone
@@ -18,6 +20,9 @@ from typing import Any, Iterable, Mapping
 
 ENTIRE_AGENT_NAME = "entire-adapter"
 ENTIRE_AGENT_TYPE = "Entire Adapter"
+LANGGRAPH_AGENT_NAME = "langgraph"
+CREWAI_AGENT_NAME = "crewai"
+KNOWN_ENTIRE_AGENT_NAMES = (ENTIRE_AGENT_NAME, LANGGRAPH_AGENT_NAME, CREWAI_AGENT_NAME)
 PROTOCOL_VERSION = 1
 DEFAULT_TIMEOUT_SECONDS = 5.0
 MAX_TEXT_LENGTH = 20_000
@@ -85,6 +90,16 @@ def new_session_id(framework: str, agent_label: str | None = None) -> str:
 
     prefix = slugify("-".join(part for part in [framework, agent_label or "agent"] if part))
     return f"{prefix}-{uuid.uuid4().hex[:16]}"
+
+
+def normalize_entire_agent_name(agent_name: str | None) -> str:
+    """Validate and normalize the external Entire agent name."""
+
+    normalized = slugify(agent_name or ENTIRE_AGENT_NAME)
+    if normalized not in KNOWN_ENTIRE_AGENT_NAMES:
+        allowed = ", ".join(KNOWN_ENTIRE_AGENT_NAMES)
+        raise ValueError(f"unknown Entire agent name {agent_name!r}; expected one of: {allowed}")
+    return normalized
 
 
 def safe_text(value: Any, *, max_length: int = MAX_TEXT_LENGTH) -> str:
@@ -214,8 +229,10 @@ class TranscriptWriter:
         *,
         repo_path: str | os.PathLike[str] | None = None,
         path: str | os.PathLike[str] | None = None,
+        agent_name: str = ENTIRE_AGENT_NAME,
     ) -> None:
         self.session_id = session_id
+        self.agent_name = normalize_entire_agent_name(agent_name)
         self.repo_path = find_repo_root(repo_path)
         self.path = Path(path).resolve() if path else resolve_session_file(
             resolve_session_dir(self.repo_path),
@@ -226,7 +243,7 @@ class TranscriptWriter:
     def append(self, record: Mapping[str, Any]) -> None:
         payload = dict(record)
         payload.setdefault("v", 1)
-        payload.setdefault("agent", ENTIRE_AGENT_NAME)
+        payload.setdefault("agent", self.agent_name)
         payload.setdefault("cli_version", os.environ.get("ENTIRE_CLI_VERSION", "unknown"))
         payload.setdefault("ts", utc_now_iso())
         data = json.dumps(to_jsonable(payload), ensure_ascii=False, separators=(",", ":"))
@@ -244,7 +261,7 @@ class TranscriptWriter:
 
 
 class EntireClient:
-    """Thin wrapper around `entire hooks entire-adapter ...`."""
+    """Thin wrapper around `entire hooks <agent> ...`."""
 
     def __init__(
         self,
@@ -253,16 +270,18 @@ class EntireClient:
         strict: bool = False,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         entire_bin: str = "entire",
+        entire_agent_name: str = ENTIRE_AGENT_NAME,
         log: logging.Logger | None = None,
     ) -> None:
         self.repo_path = find_repo_root(repo_path)
         self.strict = strict
         self.timeout = timeout
         self.entire_bin = entire_bin
+        self.entire_agent_name = normalize_entire_agent_name(entire_agent_name)
         self.log = log or logger
 
     def emit_hook(self, hook_name: str, payload: Mapping[str, Any]) -> EntireCommandResult:
-        args = [self.entire_bin, "hooks", ENTIRE_AGENT_NAME, hook_name]
+        args = self.hook_args(hook_name)
         if shutil.which(self.entire_bin) is None:
             return self._handle_skip(
                 args,
@@ -309,6 +328,9 @@ class EntireClient:
             )
         return result
 
+    def hook_args(self, hook_name: str) -> list[str]:
+        return [self.entire_bin, "hooks", self.entire_agent_name, hook_name]
+
     def _handle_skip(self, args: list[str], key: str, message: str) -> EntireCommandResult:
         if self.strict:
             raise EntireAdapterError(message)
@@ -329,12 +351,99 @@ class EntireClient:
         return EntireCommandResult(args=args, returncode=returncode, stderr=stderr)
 
 
+class AsyncHookDispatcher:
+    """Bounded background dispatcher for Entire hook calls."""
+
+    def __init__(
+        self,
+        client: EntireClient,
+        *,
+        queue_size: int = 1024,
+        strict: bool = False,
+        log: logging.Logger | None = None,
+    ) -> None:
+        if queue_size <= 0:
+            raise ValueError("async_queue_size must be positive")
+        self.client = client
+        self.strict = strict
+        self.log = log or logger
+        self._queue: queue.Queue[tuple[str, Mapping[str, Any]] | None] = queue.Queue(maxsize=queue_size)
+        self._closed = False
+        self._lock = threading.Lock()
+        self._worker = threading.Thread(target=self._run, name="entire-adapter-hooks", daemon=True)
+        self._worker.start()
+
+    def emit_hook(self, hook_name: str, payload: Mapping[str, Any]) -> EntireCommandResult:
+        args = self.client.hook_args(hook_name)
+        with self._lock:
+            if self._closed:
+                return self._handle_rejected(args, "async dispatcher is closed")
+            try:
+                self._queue.put_nowait((hook_name, dict(payload)))
+            except queue.Full:
+                return self._handle_rejected(args, "async hook queue is full; skipping Entire hook")
+        return EntireCommandResult(args=args, returncode=0)
+
+    def flush(self, timeout: float | None = None) -> bool:
+        deadline = None if timeout is None else time.monotonic() + max(timeout, 0)
+        while self._queue.unfinished_tasks:
+            if deadline is not None and time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+        return True
+
+    def close(self, timeout: float | None = None) -> None:
+        self.flush(timeout)
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            try:
+                self._queue.put_nowait(None)
+            except queue.Full:
+                try:
+                    self._queue.put(None, timeout=max(timeout or 0.1, 0.1))
+                except queue.Full:
+                    warn_once(
+                        "async-close-full",
+                        "Entire async hook queue stayed full while closing; continuing without waiting for worker stop.",
+                        log=self.log,
+                    )
+                    return
+        self._worker.join(timeout=timeout)
+
+    def _run(self) -> None:
+        while True:
+            item = self._queue.get()
+            try:
+                if item is None:
+                    return
+                hook_name, payload = item
+                try:
+                    self.client.emit_hook(hook_name, payload)
+                except Exception as exc:
+                    warn_once(
+                        f"async-hook-error:{type(exc).__name__}:{exc}",
+                        f"Entire async hook {hook_name!r} failed: {exc}",
+                        log=self.log,
+                    )
+            finally:
+                self._queue.task_done()
+
+    def _handle_rejected(self, args: list[str], message: str) -> EntireCommandResult:
+        if self.strict:
+            raise EntireAdapterError(message)
+        warn_once(f"async-rejected:{message}", message, log=self.log)
+        return EntireCommandResult(args=args, returncode=0, skipped=True)
+
+
 def enable_entire_adapter(
     *,
     repo_path: str | os.PathLike[str] | None = None,
     run: bool = False,
     telemetry: bool = False,
     timeout: float = 30.0,
+    agent: str = LANGGRAPH_AGENT_NAME,
 ) -> list[EntireCommandResult] | list[str]:
     """Print or run setup commands for this adapter.
 
@@ -342,10 +451,11 @@ def enable_entire_adapter(
     ``run=True`` to execute the Entire setup command best-effort.
     """
 
+    agent_name = normalize_entire_agent_name(agent)
     telemetry_arg = "true" if telemetry else "false"
     commands = [
         "pip install -e .",
-        f"entire enable --agent {ENTIRE_AGENT_NAME} --telemetry={telemetry_arg}",
+        f"entire enable --agent {agent_name} --telemetry={telemetry_arg}",
         "entire agent list",
     ]
     if not run:
@@ -362,14 +472,14 @@ def enable_entire_adapter(
         )
         return [
             EntireCommandResult(
-                args=["entire", "enable", "--agent", ENTIRE_AGENT_NAME],
+                args=["entire", "enable", "--agent", agent_name],
                 returncode=0,
                 skipped=True,
             )
         ]
 
     for args in (
-        ["entire", "enable", "--agent", ENTIRE_AGENT_NAME, f"--telemetry={telemetry_arg}"],
+        ["entire", "enable", "--agent", agent_name, f"--telemetry={telemetry_arg}"],
         ["entire", "agent", "list"],
     ):
         completed = subprocess.run(

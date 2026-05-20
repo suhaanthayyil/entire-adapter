@@ -15,8 +15,8 @@ This package bridges that gap.
 - Python 3.10+ package named `entire-adapter`.
 - LangChain/LangGraph callback system through `BaseCallbackHandler`.
 - CrewAI event system through `BaseEventListener`.
-- Entire external-agent protocol through a console executable named `entire-agent-entire-adapter`.
-- Entire CLI hooks through subprocess calls to `entire hooks entire-adapter <hook-name>`.
+- Entire external-agent protocol through console executables named `entire-agent-langgraph`, `entire-agent-crewai`, and `entire-agent-entire-adapter`.
+- Entire CLI hooks through subprocess calls to `entire hooks <agent-name> <hook-name>`.
 - Git-backed Entire checkpoint flow, including the `entire/checkpoints/v1` metadata branch created by Entire.
 - JSONL transcript files for prompt/tool/reasoning context.
 - PyPI packaging through `pyproject.toml`, setuptools, wheel/sdist builds, and `twine`.
@@ -33,12 +33,16 @@ entire-agent-<agent-name>
 This package installs:
 
 ```text
+entire-agent-langgraph
+entire-agent-crewai
 entire-agent-entire-adapter
 ```
 
-So the external agent name is:
+So the external agent names are:
 
 ```text
+langgraph
+crewai
 entire-adapter
 ```
 
@@ -101,11 +105,13 @@ CrewKickoffFailedEvent        -> session-end
 The adapter calls Entire with these commands:
 
 ```bash
-entire hooks entire-adapter session-start
-entire hooks entire-adapter turn-start
-entire hooks entire-adapter turn-end
-entire hooks entire-adapter session-end
+entire hooks langgraph session-start
+entire hooks langgraph turn-start
+entire hooks langgraph turn-end
+entire hooks langgraph session-end
 ```
+
+CrewAI uses the same lifecycle command shape with `crewai` as the agent name. The generic compatibility binary still uses `entire-adapter`.
 
 Each command receives JSON on stdin containing:
 
@@ -119,7 +125,10 @@ Each command receives JSON on stdin containing:
 - `model`
 - `raw_data.framework`
 - `raw_data.agent_label`
+- `raw_data.display_name`
+- `raw_data.entire_agent_name`
 - `raw_data.metadata`
+- top-level `task_description` and `response_message` when available
 
 ## Metadata strategy
 
@@ -142,19 +151,45 @@ If the adapter is not inside a Git repo, it falls back to:
 
 ## Agent identity model
 
-Entire's external agent identity is:
+Entire's external agent identities are:
 
 ```text
+langgraph
+crewai
 entire-adapter
 ```
 
-Different user agents are separated with:
+Different user workflows are separated with:
 
 - `framework`, for example `langgraph` or `crewai`
 - `agent_label`, for example `reviewer` or `research-crew`
+- `display_name`, for example `langgraph:reviewer`
 - generated `session_id`, for example `langgraph-reviewer-77f263df4f684baf`
 
-This keeps protocol integration simple while still letting dashboards distinguish runs.
+Framework-specific binaries improve dashboard grouping while `agent_label` and `session_id` distinguish individual workflows.
+
+## Checkpoint policy and async dispatch
+
+The adapter supports per-tool checkpoint policies:
+
+```python
+EntireCallbackHandler(
+    checkpoint_policy={
+        "read_file": "never",
+        "write_file": "always",
+    }
+)
+```
+
+Supported policy names are `always`, `never`, `on_success`, and `on_error`. Developers can also pass a callable that receives `ToolCheckpointContext`.
+
+High-volume agents can opt into background hook dispatch:
+
+```python
+EntireCallbackHandler(hook_dispatch="async", async_queue_size=1024)
+```
+
+Synchronous dispatch remains the default because it gives the clearest checkpoint ordering.
 
 ## Safety design
 
@@ -168,6 +203,7 @@ By default, it never crashes the agent if:
 - Entire hooks are not enabled.
 - A hook command exits non-zero.
 - A hook call times out.
+- An async queue rejects work in non-strict mode.
 
 Failures are logged once with Python `logging`. Developers can opt into strict behavior:
 
@@ -201,7 +237,7 @@ LangGraph callback -> Entire Adapter -> Entire hook -> Git commit linkage -> Ent
 
 - The adapter does not auto-commit changes.
 - Persistent `entire/checkpoints/v1` metadata is finalized by Entire's existing Git hooks during commit/session workflows.
-- v1 uses one external-agent name, `entire-adapter`; per-framework agent names can be added later if the dashboard needs separate top-level identities.
+- `entire-agent-entire-adapter` remains for compatibility, but new users should prefer `langgraph` or `crewai`.
 - CrewAI support is event-based and should be tested against the exact CrewAI version used by production users.
 
 ## How to explain the value

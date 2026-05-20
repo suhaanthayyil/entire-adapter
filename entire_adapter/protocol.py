@@ -7,12 +7,15 @@ import base64
 import json
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO, TextIO
 
 from .utils import (
+    CREWAI_AGENT_NAME,
     ENTIRE_AGENT_NAME,
     ENTIRE_AGENT_TYPE,
+    LANGGRAPH_AGENT_NAME,
     PROTOCOL_VERSION,
     compact_metadata,
     resolve_session_dir,
@@ -31,8 +34,57 @@ EVENT_TYPES = {
 }
 
 
+@dataclass(frozen=True)
+class AgentSpec:
+    name: str
+    type: str
+    description: str
+    framework: str
+    binary: str
+
+
+GENERIC_SPEC = AgentSpec(
+    name=ENTIRE_AGENT_NAME,
+    type=ENTIRE_AGENT_TYPE,
+    description="Entire Adapter - LangGraph and CrewAI callback bridge",
+    framework="custom",
+    binary="entire-agent-entire-adapter",
+)
+LANGGRAPH_SPEC = AgentSpec(
+    name=LANGGRAPH_AGENT_NAME,
+    type="LangGraph",
+    description="LangGraph callback bridge for Entire checkpoints",
+    framework="langgraph",
+    binary="entire-agent-langgraph",
+)
+CREWAI_SPEC = AgentSpec(
+    name=CREWAI_AGENT_NAME,
+    type="CrewAI",
+    description="CrewAI event listener bridge for Entire checkpoints",
+    framework="crewai",
+    binary="entire-agent-crewai",
+)
+AGENT_SPECS = {
+    GENERIC_SPEC.name: GENERIC_SPEC,
+    LANGGRAPH_SPEC.name: LANGGRAPH_SPEC,
+    CREWAI_SPEC.name: CREWAI_SPEC,
+}
+
+
 def main(argv: list[str] | None = None) -> None:
-    code = handle(argv or sys.argv[1:], sys.stdin.buffer, sys.stdout.buffer, sys.stderr)
+    main_for_spec(GENERIC_SPEC, argv)
+
+
+def main_langgraph(argv: list[str] | None = None) -> None:
+    main_for_spec(LANGGRAPH_SPEC, argv)
+
+
+def main_crewai(argv: list[str] | None = None) -> None:
+    main_for_spec(CREWAI_SPEC, argv)
+
+
+def main_for_spec(spec: AgentSpec, argv: list[str] | None = None) -> None:
+    code = handle(argv or sys.argv[1:], sys.stdin.buffer, sys.stdout.buffer, sys.stderr, spec=spec)
     raise SystemExit(code)
 
 
@@ -41,15 +93,17 @@ def handle(
     stdin: BinaryIO,
     stdout: BinaryIO,
     stderr: TextIO,
+    *,
+    spec: AgentSpec = GENERIC_SPEC,
 ) -> int:
     if not argv:
-        stderr.write("usage: entire-agent-entire-adapter <subcommand> [args]\n")
+        stderr.write(f"usage: {spec.binary} <subcommand> [args]\n")
         return 1
 
     command, args = argv[0], argv[1:]
     try:
         if command == "info":
-            write_json(stdout, info_response())
+            write_json(stdout, info_response(spec))
         elif command == "detect":
             write_json(stdout, {"present": True})
         elif command == "get-session-id":
@@ -77,7 +131,7 @@ def handle(
                 stdout,
                 {
                     "session_id": session_id,
-                    "agent_name": ENTIRE_AGENT_NAME,
+                    "agent_name": spec.name,
                     "repo_path": payload.get("repo_path") or os.environ.get("ENTIRE_REPO_ROOT", os.getcwd()),
                     "session_ref": session_ref,
                     "start_time": payload.get("timestamp") or utc_now_iso(),
@@ -107,13 +161,13 @@ def handle(
                 {
                     "command": (
                         "Rerun the LangGraph or CrewAI entrypoint that created "
-                        f"Entire Adapter session {ns.session_id}"
+                        f"{spec.type} session {ns.session_id}"
                     )
                 },
             )
         elif command == "parse-hook":
             ns = parse_args(args, [("--hook", {"required": True})])
-            event = parse_hook(ns.hook, stdin.read())
+            event = parse_hook(ns.hook, stdin.read(), spec=spec)
             write_json(stdout, event)
         elif command == "install-hooks":
             write_json(stdout, {"hooks_installed": 0})
@@ -149,7 +203,7 @@ def handle(
             write_json(stdout, {"summary": summary, "has_summary": bool(summary)})
         elif command == "compact-transcript":
             ns = parse_args(args, [("--session-ref", {"required": True})])
-            compacted = compact_transcript(ns.session_ref)
+            compacted = compact_transcript(ns.session_ref, agent_name=spec.name)
             write_json(stdout, {"transcript": b64(compacted), "assets": []})
         else:
             stderr.write(f"unknown subcommand: {command}\n")
@@ -160,12 +214,12 @@ def handle(
     return 0
 
 
-def info_response() -> dict[str, Any]:
+def info_response(spec: AgentSpec = GENERIC_SPEC) -> dict[str, Any]:
     return {
         "protocol_version": PROTOCOL_VERSION,
-        "name": ENTIRE_AGENT_NAME,
-        "type": ENTIRE_AGENT_TYPE,
-        "description": "Entire Adapter - LangGraph and CrewAI callback bridge",
+        "name": spec.name,
+        "type": spec.type,
+        "description": spec.description,
         "is_preview": True,
         "protected_dirs": [".entire-adapter"],
         "protected_files": [],
@@ -179,21 +233,33 @@ def info_response() -> dict[str, Any]:
             "text_generator": False,
             "hook_response_writer": False,
             "subagent_aware_extractor": False,
+            "uses_terminal": False,
         },
     }
 
 
-def parse_hook(hook_name: str, data: bytes) -> dict[str, Any] | None:
+def parse_hook(hook_name: str, data: bytes, *, spec: AgentSpec = GENERIC_SPEC) -> dict[str, Any] | None:
     if hook_name not in EVENT_TYPES:
         return None
     payload = json.loads(data.decode("utf-8")) if data.strip() else {}
     raw_data = payload.get("raw_data") or {}
+    framework = raw_data.get("framework") or spec.framework
+    agent_label = raw_data.get("agent_label") or spec.name
+    display_name = raw_data.get("display_name") or payload.get("display_name") or f"{framework}:{agent_label}"
+    entire_agent_name = raw_data.get("entire_agent_name") or spec.name
+    run_id = payload.get("run_id")
+    tool_name = payload.get("tool_name")
+    tool_use_id = payload.get("tool_use_id")
+    tool_input = payload.get("tool_input")
     metadata = {
-        "framework": raw_data.get("framework"),
-        "agent_label": raw_data.get("agent_label"),
+        "framework": framework,
+        "agent_label": agent_label,
+        "display_name": display_name,
+        "entire_agent_name": entire_agent_name,
         "hook_type": payload.get("hook_type") or hook_name,
-        "tool_name": payload.get("tool_name"),
-        "tool_use_id": payload.get("tool_use_id"),
+        "run_id": run_id,
+        "tool_name": tool_name,
+        "tool_use_id": tool_use_id,
     }
     raw_metadata = raw_data.get("metadata")
     if isinstance(raw_metadata, dict):
@@ -209,6 +275,14 @@ def parse_hook(hook_name: str, data: bytes) -> dict[str, Any] | None:
     }
     if hook_name == "turn-start":
         event["prompt"] = payload.get("user_prompt") or payload.get("prompt") or ""
+    if tool_use_id:
+        event["tool_use_id"] = tool_use_id
+    if tool_input not in (None, ""):
+        event["tool_input"] = to_jsonable(tool_input)
+    if payload.get("task_description"):
+        event["task_description"] = payload.get("task_description")
+    if payload.get("response_message"):
+        event["response_message"] = payload.get("response_message")
     return event
 
 
@@ -351,18 +425,18 @@ def is_probable_path(value: str) -> bool:
     return "/" in value or "\\" in value or "." in Path(value).name
 
 
-def compact_transcript(path: str | os.PathLike[str]) -> bytes:
+def compact_transcript(path: str | os.PathLike[str], *, agent_name: str = ENTIRE_AGENT_NAME) -> bytes:
     lines: list[str] = []
     for record in read_lines(path):
         normalized = {
             "v": int(record.get("v") or 1),
-            "agent": record.get("agent") or ENTIRE_AGENT_NAME,
+            "agent": record.get("agent") or agent_name,
             "cli_version": record.get("cli_version") or os.environ.get("ENTIRE_CLI_VERSION", "unknown"),
             "type": record.get("type") if record.get("type") in {"user", "assistant"} else "assistant",
             "ts": record.get("ts") or record.get("timestamp") or utc_now_iso(),
             "content": normalize_content(record.get("content")),
         }
-        for key in ("framework", "agent_label", "run_id", "tool_name", "metadata"):
+        for key in ("framework", "agent_label", "display_name", "entire_agent_name", "run_id", "tool_name", "metadata"):
             if key in record:
                 normalized[key] = to_jsonable(record[key])
         lines.append(json.dumps(normalized, separators=(",", ":"), ensure_ascii=False))

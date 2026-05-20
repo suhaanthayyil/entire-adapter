@@ -9,6 +9,8 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[langgraph,crewai,dev]"
 python -m pytest -q
+# Optional when Entire CLI is installed:
+# ENTIRE_E2E=1 python -m pytest tests/e2e -q
 python -m build
 python -m twine check dist/*
 ```
@@ -29,7 +31,7 @@ git branch -M main
 git config user.name "suhaanthayyil"
 git config user.email "suhaanthayyil@users.noreply.github.com"
 git add .
-git commit -m "Release entire-adapter MVP"
+git commit -m "Release entire-adapter 0.2.0"
 gh repo create suhaanthayyil/entire-adapter --public --source . --remote origin --push
 ```
 
@@ -71,9 +73,9 @@ Environment name: pypi
 Then create a GitHub release:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
-gh release create v0.1.0 --title "entire-adapter 0.1.0" --notes-file CHANGELOG.md
+git tag v0.2.0
+git push origin v0.2.0
+gh release create v0.2.0 --title "entire-adapter 0.2.0" --notes-file CHANGELOG.md
 ```
 
 The GitHub Action will build and publish the wheel/sdist to PyPI without storing a PyPI token in GitHub secrets.
@@ -81,6 +83,8 @@ The GitHub Action will build and publish the wheel/sdist to PyPI without storing
 Install verification:
 
 ```bash
-python -m pip install entire-adapter[langgraph]
+python -m pip install "entire-adapter[langgraph]"
+entire-agent-langgraph info
+entire-agent-crewai info
 entire-agent-entire-adapter info
 ```

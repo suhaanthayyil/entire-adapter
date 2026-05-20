@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
-from typing import Any, Mapping
+from typing import Any, Callable, Literal, Mapping
 
 from .utils import (
+    AsyncHookDispatcher,
+    CREWAI_AGENT_NAME,
     EntireClient,
+    LANGGRAPH_AGENT_NAME,
     TranscriptWriter,
     join_text_blocks,
     new_session_id,
+    normalize_entire_agent_name,
     safe_text,
     to_jsonable,
     utc_now_iso,
@@ -59,6 +64,27 @@ except Exception as exc:  # pragma: no cover - depends on optional dependency.
 
 log = logging.getLogger("entire_adapter")
 
+CheckpointPolicyName = Literal["always", "never", "on_success", "on_error"]
+
+
+@dataclass(frozen=True)
+class ToolCheckpointContext:
+    """Context passed to callable checkpoint policies."""
+
+    framework: str
+    agent_label: str
+    session_id: str
+    tool_name: str
+    tool_input: Any
+    output_summary: str
+    status: str
+    run_id: str
+    metadata: Mapping[str, Any]
+
+
+CheckpointPolicy = CheckpointPolicyName | Callable[[ToolCheckpointContext], bool]
+CheckpointPolicyConfig = CheckpointPolicy | Mapping[str, CheckpointPolicy] | None
+
 
 class _EntireSessionBridge:
     """Common lifecycle bridge used by LangChain and CrewAI integrations."""
@@ -73,16 +99,43 @@ class _EntireSessionBridge:
         model: str | None,
         strict: bool,
         checkpoint_on_tool_end: bool = True,
+        entire_agent_name: str,
+        checkpoint_policy: CheckpointPolicyConfig = None,
+        hook_dispatch: Literal["sync", "async"] = "sync",
+        async_queue_size: int = 1024,
+        flush_timeout: float = 10.0,
         entire_client: EntireClient | None = None,
         transcript: TranscriptWriter | None = None,
     ) -> None:
         self.framework = framework
         self.agent_label = agent_label
+        self.entire_agent_name = normalize_entire_agent_name(entire_agent_name)
+        self.display_name = format_display_name(framework, agent_label)
         self.session_id = session_id or new_session_id(framework, agent_label)
         self.model = model
         self.checkpoint_on_tool_end = checkpoint_on_tool_end
-        self.client = entire_client or EntireClient(repo_path=repo_path, strict=strict)
-        self.transcript = transcript or TranscriptWriter(self.session_id, repo_path=self.client.repo_path)
+        self.checkpoint_policy = checkpoint_policy
+        self.strict = strict
+        self.flush_timeout = flush_timeout
+        self.client = entire_client or EntireClient(
+            repo_path=repo_path,
+            strict=strict,
+            entire_agent_name=self.entire_agent_name,
+        )
+        self.transcript = transcript or TranscriptWriter(
+            self.session_id,
+            repo_path=self.client.repo_path,
+            agent_name=self.entire_agent_name,
+        )
+        if hook_dispatch not in {"sync", "async"}:
+            raise ValueError("hook_dispatch must be 'sync' or 'async'")
+        self.dispatcher: AsyncHookDispatcher | None = None
+        if hook_dispatch == "async":
+            self.dispatcher = AsyncHookDispatcher(
+                self.client,
+                queue_size=async_queue_size,
+                strict=strict,
+            )
         self._session_started = False
         self._session_ended = False
         self._tool_runs: dict[str, dict[str, Any]] = {}
@@ -108,10 +161,17 @@ class _EntireSessionBridge:
                     "content": [{"type": "text", "text": prompt_text}],
                     "framework": self.framework,
                     "agent_label": self.agent_label,
+                    "display_name": self.display_name,
+                    "entire_agent_name": self.entire_agent_name,
                     "metadata": to_jsonable(metadata or {}),
                 }
             )
-        self._emit("turn-start", prompt=prompt_text, metadata=metadata)
+        self._emit(
+            "turn-start",
+            prompt=prompt_text,
+            task_description=prompt_text,
+            metadata=metadata,
+        )
 
     def assistant_text(self, text: Any, metadata: Mapping[str, Any] | None = None) -> None:
         rendered = safe_text(text)
@@ -123,6 +183,8 @@ class _EntireSessionBridge:
                 "content": [{"type": "text", "text": rendered}],
                 "framework": self.framework,
                 "agent_label": self.agent_label,
+                "display_name": self.display_name,
+                "entire_agent_name": self.entire_agent_name,
                 "metadata": to_jsonable(metadata or {}),
             }
         )
@@ -155,7 +217,10 @@ class _EntireSessionBridge:
                 ],
                 "framework": self.framework,
                 "agent_label": self.agent_label,
+                "display_name": self.display_name,
+                "entire_agent_name": self.entire_agent_name,
                 "run_id": tool_use_id,
+                "tool_name": tool_name,
                 "metadata": to_jsonable(metadata or {}),
             }
         )
@@ -174,6 +239,25 @@ class _EntireSessionBridge:
         tool_input = started.get("tool_input")
         merged_metadata = dict(started.get("metadata") or {})
         merged_metadata.update(to_jsonable(metadata or {}))
+        output_summary = safe_text(output)
+        context = ToolCheckpointContext(
+            framework=self.framework,
+            agent_label=self.agent_label,
+            session_id=self.session_id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            output_summary=output_summary,
+            status=status,
+            run_id=tool_use_id,
+            metadata=merged_metadata,
+        )
+        should_checkpoint, policy_name, policy_reason = self._should_checkpoint(context)
+        merged_metadata.update(
+            {
+                "checkpoint_policy": policy_name,
+                "checkpoint_reason": policy_reason,
+            }
+        )
         self.transcript.append(
             {
                 "type": "assistant",
@@ -185,23 +269,30 @@ class _EntireSessionBridge:
                         "input": tool_input,
                         "result": {
                             "status": status,
-                            "output": safe_text(output),
+                            "output": output_summary,
                         },
                     }
                 ],
                 "framework": self.framework,
                 "agent_label": self.agent_label,
+                "display_name": self.display_name,
+                "entire_agent_name": self.entire_agent_name,
                 "run_id": tool_use_id,
                 "tool_name": tool_name,
                 "metadata": merged_metadata,
             }
         )
-        if self.checkpoint_on_tool_end:
+        if should_checkpoint:
             self._emit(
                 "turn-end",
                 tool_name=tool_name,
                 tool_use_id=tool_use_id,
                 tool_input=tool_input,
+                run_id=tool_use_id,
+                checkpoint_policy=policy_name,
+                checkpoint_reason=policy_reason,
+                task_description=f"{self.display_name} used {tool_name}",
+                response_message=output_summary,
                 metadata=merged_metadata,
             )
 
@@ -210,7 +301,17 @@ class _EntireSessionBridge:
             return
         self.start_session(metadata=metadata)
         self._emit("session-end", metadata=metadata)
+        self.flush(self.flush_timeout)
         self._session_ended = True
+
+    def flush(self, timeout: float | None = None) -> bool:
+        if self.dispatcher is None:
+            return True
+        return self.dispatcher.flush(timeout)
+
+    def close(self, timeout: float | None = None) -> None:
+        if self.dispatcher is not None:
+            self.dispatcher.close(timeout if timeout is not None else self.flush_timeout)
 
     def _emit(
         self,
@@ -220,12 +321,32 @@ class _EntireSessionBridge:
         tool_name: str = "",
         tool_use_id: str = "",
         tool_input: Any = None,
+        run_id: str = "",
+        checkpoint_policy: str = "",
+        checkpoint_reason: str = "",
+        task_description: str = "",
+        response_message: str = "",
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
+        run_id = run_id or safe_run_id((metadata or {}).get("run_id"))
+        enriched_metadata = {
+            "framework": self.framework,
+            "agent_label": self.agent_label,
+            "display_name": self.display_name,
+            "entire_agent_name": self.entire_agent_name,
+            "run_id": run_id,
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "checkpoint_policy": checkpoint_policy,
+            "checkpoint_reason": checkpoint_reason,
+            **to_jsonable(metadata or {}),
+        }
         raw_data = {
             "framework": self.framework,
             "agent_label": self.agent_label,
-            "metadata": to_jsonable(metadata or {}),
+            "display_name": self.display_name,
+            "entire_agent_name": self.entire_agent_name,
+            "metadata": enriched_metadata,
         }
         payload = {
             "hook_type": hook_name,
@@ -236,10 +357,48 @@ class _EntireSessionBridge:
             "tool_name": tool_name,
             "tool_use_id": tool_use_id,
             "tool_input": to_jsonable(tool_input),
+            "run_id": run_id,
+            "display_name": self.display_name,
+            "task_description": task_description,
+            "response_message": response_message,
             "raw_data": raw_data,
             "model": self.model,
         }
-        self.client.emit_hook(hook_name, payload)
+        if self.dispatcher is not None:
+            self.dispatcher.emit_hook(hook_name, payload)
+        else:
+            self.client.emit_hook(hook_name, payload)
+
+    def _should_checkpoint(self, context: ToolCheckpointContext) -> tuple[bool, str, str]:
+        policy = self._resolve_checkpoint_policy(context.tool_name)
+        if policy is None:
+            allowed = bool(self.checkpoint_on_tool_end)
+            return (
+                allowed,
+                f"checkpoint_on_tool_end:{str(allowed).lower()}",
+                "legacy checkpoint_on_tool_end setting",
+            )
+        if callable(policy):
+            allowed = bool(policy(context))
+            return allowed, "callable", "callable checkpoint policy"
+        if policy == "always":
+            return True, "always", "tool completed"
+        if policy == "never":
+            return False, "never", "tool checkpoint disabled"
+        if policy == "on_success":
+            return context.status == "success", "on_success", f"tool status is {context.status}"
+        if policy == "on_error":
+            return context.status == "error", "on_error", f"tool status is {context.status}"
+        raise ValueError(f"unknown checkpoint policy: {policy!r}")
+
+    def _resolve_checkpoint_policy(self, tool_name: str) -> CheckpointPolicy | None:
+        if isinstance(self.checkpoint_policy, Mapping):
+            if tool_name in self.checkpoint_policy:
+                return self.checkpoint_policy[tool_name]
+            if "*" in self.checkpoint_policy:
+                return self.checkpoint_policy["*"]
+            return None
+        return self.checkpoint_policy
 
 
 class EntireCallbackHandler(BaseCallbackHandler):
@@ -253,6 +412,11 @@ class EntireCallbackHandler(BaseCallbackHandler):
         model: str | None = None,
         strict: bool = False,
         checkpoint_on_tool_end: bool = True,
+        entire_agent_name: str = LANGGRAPH_AGENT_NAME,
+        checkpoint_policy: CheckpointPolicyConfig = None,
+        hook_dispatch: Literal["sync", "async"] = "sync",
+        async_queue_size: int = 1024,
+        flush_timeout: float = 10.0,
     ) -> None:
         super().__init__()
         self.bridge = _EntireSessionBridge(
@@ -263,6 +427,11 @@ class EntireCallbackHandler(BaseCallbackHandler):
             model=model,
             strict=strict,
             checkpoint_on_tool_end=checkpoint_on_tool_end,
+            entire_agent_name=entire_agent_name,
+            checkpoint_policy=checkpoint_policy,
+            hook_dispatch=hook_dispatch,
+            async_queue_size=async_queue_size,
+            flush_timeout=flush_timeout,
         )
 
     @property
@@ -272,6 +441,12 @@ class EntireCallbackHandler(BaseCallbackHandler):
     @property
     def session_ref(self) -> str:
         return self.bridge.session_ref
+
+    def flush(self, timeout: float | None = None) -> bool:
+        return self.bridge.flush(timeout)
+
+    def close(self, timeout: float | None = None) -> None:
+        self.bridge.close(timeout)
 
     def on_chain_start(
         self,
@@ -445,6 +620,12 @@ class EntireCrewAIListener(BaseEventListener):
         repo_path: str | None = None,
         model: str | None = None,
         strict: bool = False,
+        checkpoint_on_tool_end: bool = True,
+        entire_agent_name: str = CREWAI_AGENT_NAME,
+        checkpoint_policy: CheckpointPolicyConfig = None,
+        hook_dispatch: Literal["sync", "async"] = "sync",
+        async_queue_size: int = 1024,
+        flush_timeout: float = 10.0,
     ) -> None:
         super().__init__()
         self.bridge = _EntireSessionBridge(
@@ -454,7 +635,12 @@ class EntireCrewAIListener(BaseEventListener):
             repo_path=repo_path,
             model=model,
             strict=strict,
-            checkpoint_on_tool_end=True,
+            checkpoint_on_tool_end=checkpoint_on_tool_end,
+            entire_agent_name=entire_agent_name,
+            checkpoint_policy=checkpoint_policy,
+            hook_dispatch=hook_dispatch,
+            async_queue_size=async_queue_size,
+            flush_timeout=flush_timeout,
         )
         if _CREWAI_IMPORT_ERROR is not None:
             log.debug("CrewAI listener imported without CrewAI events: %s", _CREWAI_IMPORT_ERROR)
@@ -466,6 +652,12 @@ class EntireCrewAIListener(BaseEventListener):
     @property
     def session_ref(self) -> str:
         return self.bridge.session_ref
+
+    def flush(self, timeout: float | None = None) -> bool:
+        return self.bridge.flush(timeout)
+
+    def close(self, timeout: float | None = None) -> None:
+        self.bridge.close(timeout)
 
     def setup_listeners(self, crewai_event_bus: Any) -> None:
         if CrewKickoffStartedEvent is None:
@@ -553,6 +745,10 @@ def safe_run_id(value: Any) -> str:
     if value is None:
         return ""
     return str(value).replace("/", "-").replace("\\", "-")
+
+
+def format_display_name(framework: str, agent_label: str) -> str:
+    return f"{framework}:{agent_label}"
 
 
 def extract_prompt(value: Any) -> str:

@@ -1,6 +1,6 @@
 """Live LangGraph smoke test for entire-adapter.
 
-This script is run by run_live_test.sh inside a temporary Git repo.
+Run this inside a Git repo enabled with `entire enable --agent langgraph`.
 It writes a file through a LangChain tool so EntireCallbackHandler receives
 on_tool_start/on_tool_end events and can trigger an Entire turn-end hook.
 """

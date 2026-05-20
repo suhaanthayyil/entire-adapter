@@ -3,7 +3,7 @@
 Run setup once from a git repository:
 
     pip install -e .
-    entire enable --agent entire-adapter --telemetry=false
+    entire enable --agent langgraph --telemetry=false
 
 Then pass the callback in the graph invoke config.
 """
