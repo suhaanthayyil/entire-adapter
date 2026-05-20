@@ -130,7 +130,7 @@ If the async queue fills, non-strict mode warns and skips the hook. `strict=True
 Entire discovers external agents from executables named:
 
 ```text
-entire-agent-<name>
+entire-agent-{name}
 ```
 
 This package installs:
@@ -169,7 +169,7 @@ Each hook/transcript record includes richer labels for dashboards:
 The adapter writes append-only JSONL transcripts outside the worktree when possible:
 
 ```text
-.git/entire-adapter/sessions/<session-id>.jsonl
+.git/entire-adapter/sessions/SESSION_ID.jsonl
 ```
 
 Entire reads this transcript through the external-agent protocol so reasoning and tool context can be displayed alongside file changes.

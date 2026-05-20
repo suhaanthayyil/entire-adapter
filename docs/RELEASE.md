@@ -73,9 +73,9 @@ Environment name: pypi
 Then create a GitHub release:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
-gh release create v0.2.0 --title "entire-adapter 0.2.0" --notes-file CHANGELOG.md
+git tag v0.2.1
+git push origin v0.2.1
+gh release create v0.2.1 --title "entire-adapter 0.2.1" --notes-file CHANGELOG.md
 ```
 
 The GitHub Action will build and publish the wheel/sdist to PyPI without storing a PyPI token in GitHub secrets.

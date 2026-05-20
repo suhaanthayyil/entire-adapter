@@ -3,7 +3,7 @@
 from .adapter import EntireCallbackHandler, EntireCrewAIListener, ToolCheckpointContext
 from .utils import enable_entire_adapter
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 __all__ = [
     "EntireCallbackHandler",

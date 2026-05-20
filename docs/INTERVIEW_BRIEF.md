@@ -27,7 +27,7 @@ This package bridges that gap.
 Entire discovers external agents by looking for executables on `PATH` named:
 
 ```text
-entire-agent-<agent-name>
+entire-agent-{agent-name}
 ```
 
 This package installs:
@@ -140,13 +140,13 @@ Entire's normalized event metadata is a string map, so the adapter stores rich m
 Transcript location:
 
 ```text
-.git/entire-adapter/sessions/<session-id>.jsonl
+.git/entire-adapter/sessions/SESSION_ID.jsonl
 ```
 
 If the adapter is not inside a Git repo, it falls back to:
 
 ```text
-.entire-adapter/sessions/<session-id>.jsonl
+.entire-adapter/sessions/SESSION_ID.jsonl
 ```
 
 ## Agent identity model

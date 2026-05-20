@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 - 2026-05-19
+
+Documentation patch.
+
+- Avoid angle-bracket placeholders in README/docs so PyPI renders protocol and transcript paths correctly.
+
 ## 0.2.0 - 2026-05-19
 
 Framework-aware release.
