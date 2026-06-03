@@ -203,11 +203,7 @@ func signatureFromNode(node *sitter.Node, src []byte) string {
 	if end <= start || int(end) > len(src) {
 		end = node.EndByte()
 	}
-	signature := strings.TrimSpace(string(src[start:end]))
-	if index := strings.IndexByte(signature, '\n'); index >= 0 {
-		signature = signature[:index]
-	}
-	return strings.TrimSpace(strings.TrimRight(signature, "{:; \t\r\n"))
+	return normalizeSignature(string(src[start:end]))
 }
 
 func firstBodyLikeChild(node *sitter.Node) *sitter.Node {
@@ -333,6 +329,10 @@ func validNode(node *sitter.Node) bool {
 func normalize(value string) string {
 	fields := strings.Fields(value)
 	return strings.Join(fields, " ")
+}
+
+func normalizeSignature(value string) string {
+	return strings.TrimSpace(strings.TrimRight(normalize(value), "{:; \t\r\n"))
 }
 
 func entityFingerprintSource(entity Entity, block string) string {

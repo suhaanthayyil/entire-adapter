@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,45 @@ func TestAnalyzeGitRangeDependentCounts(t *testing.T) {
 				t.Fatalf("dependents = %d, want 1 in %#v", change.DependentsCount, change)
 			}
 		}
+	}
+}
+
+func TestAnalyzeGitRangeMultiLineSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "config.py", `def build_config(
+    user,
+):
+    return {"user": user}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "config.py", `def build_config(
+    user,
+    *,
+    strict=False,
+):
+    return {"user": user}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "multi-line signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "build_config")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict=False") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
 	}
 }
 
