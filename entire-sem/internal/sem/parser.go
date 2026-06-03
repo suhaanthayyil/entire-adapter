@@ -302,11 +302,7 @@ func goReceiverName(node *sitter.Node, src []byte) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	name := strings.Trim(fields[len(fields)-1], "*[]")
-	if index := strings.LastIndex(name, "."); index >= 0 {
-		name = name[index+1:]
-	}
-	return strings.TrimSpace(name)
+	return normalizeGoReceiverTypeName(fields[len(fields)-1])
 }
 
 func qualify(scope, name string) string {
@@ -314,6 +310,20 @@ func qualify(scope, name string) string {
 		return name
 	}
 	return scope + "." + name
+}
+
+func normalizeGoReceiverTypeName(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimLeft(value, "*[]")
+	value = strings.TrimRight(value, " \t\r\n")
+	if index := strings.Index(value, "["); index >= 0 {
+		value = value[:index]
+	}
+	value = strings.TrimRight(value, "*[]")
+	if index := strings.LastIndex(value, "."); index >= 0 {
+		value = value[index+1:]
+	}
+	return strings.TrimSpace(value)
 }
 
 func validNode(node *sitter.Node) bool {

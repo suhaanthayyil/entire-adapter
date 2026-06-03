@@ -81,10 +81,12 @@ func TestTreeSitterParserMultiLanguageEntities(t *testing.T) {
 			language: "Go",
 			input: `package main
 type User struct { Name string }
+type Store[T any] struct { Value T }
 func (u User) Validate(value string) bool { return value != "" }
+func (s *Store[T]) Load() T { return s.Value }
 func Format() {}
 `,
-			names: []string{"User", "User.Validate", "Format"},
+			names: []string{"User", "Store", "User.Validate", "Store.Load", "Format"},
 		},
 		{
 			path:     "app.ts",
