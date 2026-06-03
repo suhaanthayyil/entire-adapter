@@ -116,7 +116,7 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 			kind = "method"
 			name = qualify(scope, name)
 		}
-	case "function_signature_item":
+	case "function_signature", "function_signature_item":
 		kind = "function"
 		name = nodeName(node, src)
 		if scope != "" {
@@ -172,7 +172,7 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		name = nodeName(node, src)
 	case "variable_declarator":
 		value := node.ChildByFieldName("value")
-		if !functionLikeValue(value) {
+		if !functionLikeValue(value) && !variableTypeAnnotationFunctionLike(node) {
 			return Entity{}, false
 		}
 		kind = "function"
@@ -455,8 +455,8 @@ func functionValueForSignature(node *sitter.Node, src []byte) *sitter.Node {
 
 func signatureStartByte(node *sitter.Node, src []byte) uint32 {
 	start := node.StartByte()
-	if exportStart, ok := exportDeclarationStartByte(node, src); ok {
-		start = exportStart
+	if prefixStart, ok := declarationPrefixStartByte(node, src); ok {
+		start = prefixStart
 	}
 	for prev := node.PrevNamedSibling(); validNode(prev) && prev.Type() == "decorator"; prev = prev.PrevNamedSibling() {
 		start = prev.StartByte()
@@ -465,17 +465,17 @@ func signatureStartByte(node *sitter.Node, src []byte) uint32 {
 }
 
 func isDefaultExportDeclaration(node *sitter.Node, src []byte) bool {
-	_, fields, ok := exportDeclarationPrefix(node, src)
+	_, fields, ok := declarationPrefix(node, src)
 	return ok && len(fields) > 1 && fields[1] == "default"
 }
 
-func exportDeclarationStartByte(node *sitter.Node, src []byte) (uint32, bool) {
-	start, _, ok := exportDeclarationPrefix(node, src)
+func declarationPrefixStartByte(node *sitter.Node, src []byte) (uint32, bool) {
+	start, _, ok := declarationPrefix(node, src)
 	return start, ok
 }
 
-func exportDeclarationPrefix(node *sitter.Node, src []byte) (uint32, []string, bool) {
-	if !exportPrefixEligibleNode(node) {
+func declarationPrefix(node *sitter.Node, src []byte) (uint32, []string, bool) {
+	if !declarationPrefixEligibleNode(node) {
 		return 0, nil, false
 	}
 	start := int(node.StartByte())
@@ -488,22 +488,22 @@ func exportDeclarationPrefix(node *sitter.Node, src []byte) (uint32, []string, b
 	}
 	prefix := string(src[lineStart:start])
 	fields := strings.Fields(prefix)
-	if len(fields) == 0 || fields[0] != "export" {
+	if len(fields) == 0 || (fields[0] != "export" && fields[0] != "declare") {
 		return 0, nil, false
 	}
-	exportOffset := strings.Index(prefix, "export")
-	if exportOffset < 0 {
+	prefixOffset := strings.Index(prefix, fields[0])
+	if prefixOffset < 0 {
 		return 0, nil, false
 	}
-	return uint32(lineStart + exportOffset), fields, true
+	return uint32(lineStart + prefixOffset), fields, true
 }
 
-func exportPrefixEligibleNode(node *sitter.Node) bool {
+func declarationPrefixEligibleNode(node *sitter.Node) bool {
 	if !validNode(node) {
 		return false
 	}
 	switch node.Type() {
-	case "function_declaration", "generator_function_declaration", "class_declaration", "abstract_class_declaration", "interface_declaration", "type_alias_declaration", "variable_declarator":
+	case "function_declaration", "generator_function_declaration", "function_signature", "class_declaration", "abstract_class_declaration", "interface_declaration", "type_alias_declaration", "variable_declarator":
 		return true
 	default:
 		return false
@@ -553,6 +553,45 @@ func functionLikeNode(node *sitter.Node) *sitter.Node {
 	default:
 		return nil
 	}
+}
+
+func variableTypeAnnotationFunctionLike(node *sitter.Node) bool {
+	annotation := namedChildOfType(node, "type_annotation")
+	return typeAnnotationFunctionLike(annotation)
+}
+
+func typeAnnotationFunctionLike(node *sitter.Node) bool {
+	if !validNode(node) {
+		return false
+	}
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if !validNode(child) {
+			continue
+		}
+		switch child.Type() {
+		case "function_type", "constructor_type", "call_signature":
+			return true
+		case "parenthesized_type":
+			if typeAnnotationFunctionLike(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func namedChildOfType(node *sitter.Node, nodeType string) *sitter.Node {
+	if !validNode(node) {
+		return nil
+	}
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if validNode(child) && child.Type() == nodeType {
+			return child
+		}
+	}
+	return nil
 }
 
 func objectLikeValue(node *sitter.Node) bool {

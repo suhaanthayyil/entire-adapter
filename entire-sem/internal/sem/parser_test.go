@@ -115,6 +115,15 @@ func assertEntitySignatureContains(t *testing.T, entities []Entity, name, want s
 	t.Fatalf("missing entity %q in %#v", name, entities)
 }
 
+func entityKind(entities []Entity, name string) string {
+	for _, entity := range entities {
+		if entity.Name == name {
+			return entity.Kind
+		}
+	}
+	return ""
+}
+
 func TestTreeSitterParserDoesNotScopeLocalFunctionsAsMethods(t *testing.T) {
 	entities, language := TreeSitterParser{}.Parse("worker.py", `class Runner:
     def run(self):
@@ -388,6 +397,41 @@ export const build = (value: string) => value
 		"build":   "export const build",
 	} {
 		assertEntitySignatureContains(t, entities, name, want)
+	}
+}
+
+func TestTreeSitterParserTypeScriptAmbientDeclarations(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("api.d.ts", `declare function run(value: string): string
+declare class View { render(value: string): string }
+declare interface Api { request(path: string): string }
+export declare const build: (value: string) => string
+export declare const config: { build(value: string): string }
+`)
+	if language != "TypeScript" {
+		t.Fatalf("language = %q", language)
+	}
+	for name, kind := range map[string]string{
+		"run":         "function",
+		"View":        "class",
+		"View.render": "method",
+		"Api":         "interface",
+		"Api.request": "method",
+		"build":       "function",
+	} {
+		if got := entityKind(entities, name); got != kind {
+			t.Fatalf("%s kind = %q, want %q in %#v", name, got, kind, entities)
+		}
+	}
+	for name, want := range map[string]string{
+		"run":   "declare function run",
+		"View":  "declare class View",
+		"Api":   "declare interface Api",
+		"build": "export declare const build",
+	} {
+		assertEntitySignatureContains(t, entities, name, want)
+	}
+	if kind := entityKind(entities, "config"); kind != "" {
+		t.Fatalf("object-typed const leaked as function entity kind %q in %#v", kind, entities)
 	}
 }
 

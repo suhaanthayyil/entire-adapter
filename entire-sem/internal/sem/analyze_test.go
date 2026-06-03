@@ -803,6 +803,37 @@ export const build = (value) => value
 	}
 }
 
+func TestAnalyzeGitRangeTypeScriptAmbientConstFunctionSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "api.d.ts", `export declare const build: (value: string) => string
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "api.d.ts", `export declare const build: (value: string, strict?: boolean) => string
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "ambient const signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "build")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict?: boolean") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeJavaScriptObjectFunctionSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
