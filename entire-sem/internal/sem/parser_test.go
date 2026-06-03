@@ -169,6 +169,28 @@ class Pipeline:
 	assertEntitySignatureContains(t, entities, "Pipeline.normalize", "lambda self, value")
 }
 
+func TestTreeSitterParserGoAssignedFunctionEntities(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("main.go", `package main
+
+var Validate = func(value string) bool { return value != "" }
+var Label = "not a function"
+`)
+	if language != "Go" {
+		t.Fatalf("language = %q", language)
+	}
+	seen := map[string]string{}
+	for _, entity := range entities {
+		seen[entity.Name] = entity.Kind
+	}
+	if seen["Validate"] != "function" {
+		t.Fatalf("Validate kind = %q, want function in %#v", seen["Validate"], entities)
+	}
+	if _, ok := seen["Label"]; ok {
+		t.Fatalf("non-function variable leaked as entity in %#v", entities)
+	}
+	assertEntitySignatureContains(t, entities, "Validate", "func(value string) bool")
+}
+
 func TestTreeSitterParserTypeScriptAccessorsAndPrivateMembers(t *testing.T) {
 	entities, language := TreeSitterParser{}.Parse("user.ts", `class User {
   constructor(id: string) {}

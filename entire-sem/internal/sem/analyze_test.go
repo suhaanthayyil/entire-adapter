@@ -771,6 +771,53 @@ func TestAnalyzeGitRangeIgnoresAnonymousObjectFunctionMembers(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangeGoAssignedFunctionSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "main.go", `package main
+
+var Validate = func(value string) bool { return value != "" }
+var Label = "Validate should not count from a string"
+
+func Use() bool { return Validate("x") }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "main.go", `package main
+
+var Validate = func(value string, strict bool) bool { return strict && value != "" }
+var Label = "Validate should not count from a string"
+
+func Use() bool { return Validate("x") }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "assigned function signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "Validate")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want Use() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict bool") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+	if scalar := findChange(result, "Label"); scalar.Name != "" {
+		t.Fatalf("non-function Go variable produced change: %#v", scalar)
+	}
+}
+
 func TestAnalyzeGitRangeGoInterfaceMethodSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")

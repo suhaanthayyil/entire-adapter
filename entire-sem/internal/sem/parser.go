@@ -169,6 +169,13 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		}
 		kind = "function"
 		name = nodeName(node, src)
+	case "var_spec":
+		value := node.ChildByFieldName("value")
+		if !functionLikeValue(value) {
+			return Entity{}, false
+		}
+		kind = "function"
+		name = nodeName(node, src)
 	case "assignment":
 		value := assignmentValue(node)
 		if !functionLikeValue(value) {
@@ -313,8 +320,8 @@ func exportDefaultFunctionValue(node *sitter.Node, src []byte) *sitter.Node {
 	}
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
-		if functionLikeValue(child) {
-			return child
+		if value := functionLikeNode(child); validNode(value) {
+			return value
 		}
 	}
 	return nil
@@ -402,10 +409,10 @@ func signatureFromNode(node *sitter.Node, src []byte) string {
 }
 
 func functionValueForSignature(node *sitter.Node, src []byte) *sitter.Node {
-	if value := node.ChildByFieldName("value"); functionLikeValue(value) {
+	if value := functionLikeNode(node.ChildByFieldName("value")); validNode(value) {
 		return value
 	}
-	if value := assignmentValue(node); functionLikeValue(value) {
+	if value := functionLikeNode(assignmentValue(node)); validNode(value) {
 		return value
 	}
 	if value := exportDefaultFunctionValue(node, src); functionLikeValue(value) {
@@ -447,14 +454,23 @@ func firstBodyLikeChild(node *sitter.Node) *sitter.Node {
 }
 
 func functionLikeValue(node *sitter.Node) bool {
+	return validNode(functionLikeNode(node))
+}
+
+func functionLikeNode(node *sitter.Node) *sitter.Node {
 	if !validNode(node) {
-		return false
+		return nil
 	}
 	switch node.Type() {
-	case "arrow_function", "function", "function_expression", "generator_function", "lambda":
-		return true
+	case "arrow_function", "function", "function_expression", "generator_function", "lambda", "func_literal":
+		return node
+	case "expression_list":
+		if node.NamedChildCount() != 1 {
+			return nil
+		}
+		return functionLikeNode(node.NamedChild(0))
 	default:
-		return false
+		return nil
 	}
 }
 
