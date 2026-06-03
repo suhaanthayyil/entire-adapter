@@ -122,11 +122,12 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 			name = qualify(receiver, name)
 		}
 	case "method_definition":
+		if scope == "" {
+			return Entity{}, false
+		}
 		kind = methodKind(node, src)
 		name = nodeName(node, src)
-		if scope != "" {
-			name = qualify(scope, name)
-		}
+		name = qualify(scope, name)
 	case "method_signature", "abstract_method_signature", "method_elem":
 		if scope == "" {
 			return Entity{}, false

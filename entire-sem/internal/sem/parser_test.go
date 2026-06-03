@@ -240,6 +240,24 @@ export default {
 	}
 }
 
+func TestTreeSitterParserIgnoresAnonymousObjectFunctionMembers(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("callback.js", `configure({
+  run(value) { return value },
+  save: (value) => value,
+  get name() { return "" },
+})
+`)
+	if language != "JavaScript" {
+		t.Fatalf("language = %q", language)
+	}
+	for _, entity := range entities {
+		switch entity.Name {
+		case "run", "save", "name":
+			t.Fatalf("anonymous object member leaked as entity: %#v in %#v", entity, entities)
+		}
+	}
+}
+
 func TestTreeSitterParserMultiLanguageEntities(t *testing.T) {
 	tests := []struct {
 		path     string

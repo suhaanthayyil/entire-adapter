@@ -479,6 +479,39 @@ func TestAnalyzeGitRangeJavaScriptDefaultObjectMethodBodyChange(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangeIgnoresAnonymousObjectFunctionMembers(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "callback.js", `configure({
+  run(value) { return value },
+  save: (value) => value,
+})
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "callback.js", `configure({
+  run(value, strict = false) { return value },
+  save: (value, strict = false) => value,
+})
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "anonymous callback change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Files) != 0 {
+		t.Fatalf("anonymous object function members should not produce semantic changes: %#v", result.Files)
+	}
+}
+
 func TestAnalyzeGitRangeGoInterfaceMethodSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
