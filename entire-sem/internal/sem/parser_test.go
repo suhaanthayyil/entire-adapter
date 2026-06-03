@@ -171,6 +171,32 @@ func TestTreeSitterParserTypeScriptAccessorsAndPrivateMembers(t *testing.T) {
 	}
 }
 
+func TestTreeSitterParserJavaScriptAssignedAndDefaultFunctions(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("exports.js", `module.exports = function(value) { return value }
+exports.run = (value) => value
+Foo.build = function(value) { return value }
+export default (value) => value
+`)
+	if language != "JavaScript" {
+		t.Fatalf("language = %q", language)
+	}
+	seen := map[string]string{}
+	for _, entity := range entities {
+		seen[entity.Name] = entity.Kind
+	}
+	for name, kind := range map[string]string{
+		"module.exports": "function",
+		"exports.run":    "function",
+		"Foo.build":      "method",
+		"default":        "function",
+	} {
+		if seen[name] != kind {
+			t.Fatalf("%s kind = %q, want %q in %#v", name, seen[name], kind, entities)
+		}
+	}
+	assertEntitySignatureContains(t, entities, "default", "export default")
+}
+
 func TestTreeSitterParserMultiLanguageEntities(t *testing.T) {
 	tests := []struct {
 		path     string

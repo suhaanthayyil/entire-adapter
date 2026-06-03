@@ -333,6 +333,75 @@ function render(user: User) { return user.save("x") }
 	}
 }
 
+func TestAnalyzeGitRangeJavaScriptAssignedFunctionSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "exports.js", `exports.run = (value) => value
+
+function use(value) { return run(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "exports.js", `exports.run = (value, strict = false) => value
+
+function use(value) { return run(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "assigned signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "exports.run")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want use() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+}
+
+func TestAnalyzeGitRangeJavaScriptDefaultExportBodyChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "main.js", `export default (value) => value + 1
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "main.js", `export default (value) => value + 2
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "default body change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "default")
+	if change.Type != "body_changed" {
+		t.Fatalf("change type = %q, want body_changed in %#v", change.Type, change)
+	}
+	if change.OldSignature != change.NewSignature {
+		t.Fatalf("signatures differ: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeGoInterfaceMethodSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")

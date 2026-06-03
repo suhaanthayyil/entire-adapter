@@ -159,6 +159,13 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		}
 		kind = "function"
 		name = nodeName(node, src)
+	case "assignment_expression":
+		value := assignedFunctionValue(node)
+		if !functionLikeValue(value) {
+			return Entity{}, false
+		}
+		name = referenceName(assignmentTarget(node), src)
+		kind = assignedFunctionKind(name)
 	case "field_definition", "public_field_definition":
 		value := node.ChildByFieldName("value")
 		if !functionLikeValue(value) {
@@ -170,6 +177,12 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 			kind = "method"
 			name = qualify(scope, name)
 		}
+	case "export_statement":
+		if !functionLikeValue(exportDefaultFunctionValue(node, src)) {
+			return Entity{}, false
+		}
+		kind = "function"
+		name = "default"
 	default:
 		return Entity{}, false
 	}
@@ -206,6 +219,66 @@ func nodeName(node *sitter.Node, src []byte) string {
 	return ""
 }
 
+func assignmentTarget(node *sitter.Node) *sitter.Node {
+	if target := node.ChildByFieldName("left"); validNode(target) {
+		return target
+	}
+	if node.NamedChildCount() > 0 {
+		return node.NamedChild(0)
+	}
+	return nil
+}
+
+func assignedFunctionValue(node *sitter.Node) *sitter.Node {
+	if value := node.ChildByFieldName("right"); validNode(value) {
+		return value
+	}
+	if node.NamedChildCount() > 1 {
+		return node.NamedChild(1)
+	}
+	return nil
+}
+
+func assignedFunctionKind(name string) string {
+	if strings.Contains(name, ".") && name != "module.exports" && !strings.HasPrefix(name, "module.exports.") && !strings.HasPrefix(name, "exports.") {
+		return "method"
+	}
+	return "function"
+}
+
+func referenceName(node *sitter.Node, src []byte) string {
+	if !validNode(node) {
+		return ""
+	}
+	if isNameNode(node.Type()) {
+		return node.Content(src)
+	}
+	if node.Type() != "member_expression" {
+		return ""
+	}
+	parts := make([]string, 0, node.NamedChildCount())
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		part := referenceName(node.NamedChild(i), src)
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, ".")
+}
+
+func exportDefaultFunctionValue(node *sitter.Node, src []byte) *sitter.Node {
+	if !strings.HasPrefix(normalize(node.Content(src)), "export default ") {
+		return nil
+	}
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if functionLikeValue(child) {
+			return child
+		}
+	}
+	return nil
+}
+
 func hasNamedChildType(node *sitter.Node, nodeType string) bool {
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
@@ -240,7 +313,7 @@ func methodKind(node *sitter.Node, src []byte) string {
 func signatureFromNode(node *sitter.Node, src []byte) string {
 	start := signatureStartByte(node)
 	end := node.EndByte()
-	if value := node.ChildByFieldName("value"); functionLikeValue(value) {
+	if value := functionValueForSignature(node, src); functionLikeValue(value) {
 		if bodyStart, ok := functionBodyStart(value); ok {
 			end = bodyStart
 		}
@@ -251,6 +324,19 @@ func signatureFromNode(node *sitter.Node, src []byte) string {
 		end = node.EndByte()
 	}
 	return normalizeSignature(string(src[start:end]))
+}
+
+func functionValueForSignature(node *sitter.Node, src []byte) *sitter.Node {
+	if value := node.ChildByFieldName("value"); functionLikeValue(value) {
+		return value
+	}
+	if value := assignedFunctionValue(node); functionLikeValue(value) {
+		return value
+	}
+	if value := exportDefaultFunctionValue(node, src); functionLikeValue(value) {
+		return value
+	}
+	return nil
 }
 
 func signatureStartByte(node *sitter.Node) uint32 {
