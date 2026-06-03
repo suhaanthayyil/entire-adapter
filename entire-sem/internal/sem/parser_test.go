@@ -169,8 +169,10 @@ pub fn validate(value: &str) -> bool { true }
 trait Run { fn run(&self); }
 impl User { pub fn active(&self) -> bool { true } }
 impl<T> Bag<T> { pub fn unwrap_owned(self) -> T { self.0 } }
+impl std::fmt::Display for User { fn fmt(&self, f: &mut Formatter<'_>) -> Result { Ok(()) } }
+impl<T: Clone> IntoIterator for Bag<T> { fn into_iter(self) -> Iter<T> { todo!() } }
 `,
-			names: []string{"User", "Bag", "validate", "Run", "Run.run", "User.active", "Bag.unwrap_owned"},
+			names: []string{"User", "Bag", "validate", "Run", "Run.run", "User.active", "Bag.unwrap_owned", "User.fmt", "Bag.into_iter"},
 		},
 	}
 

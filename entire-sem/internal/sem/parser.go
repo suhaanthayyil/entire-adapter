@@ -311,17 +311,20 @@ func rustImplName(node *sitter.Node, src []byte) string {
 	if target := node.ChildByFieldName("type"); validNode(target) {
 		return normalizeRustTypeName(target.Content(src))
 	}
+	var target string
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
 		if !validNode(child) {
 			continue
 		}
 		switch child.Type() {
+		case "declaration_list":
+			return target
 		case "type_identifier", "generic_type", "scoped_type_identifier":
-			return normalizeRustTypeName(child.Content(src))
+			target = normalizeRustTypeName(child.Content(src))
 		}
 	}
-	return ""
+	return target
 }
 
 func normalizeRustTypeName(value string) string {

@@ -289,6 +289,59 @@ func Use(r Reader, p []byte) { _, _ = r.Read(p) }
 	}
 }
 
+func TestAnalyzeGitRangeRustTraitImplScopesToImplementingType(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "lib.rs", `pub struct User;
+pub struct Formatter;
+pub struct Result;
+
+impl std::fmt::Display for User {
+    fn fmt(&self, f: &mut Formatter) -> Result { Result }
+}
+
+pub fn render(user: User, formatter: &mut Formatter) { user.fmt(formatter); }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "lib.rs", `pub struct User;
+pub struct Formatter;
+pub struct Result;
+
+impl std::fmt::Display for User {
+    fn fmt(&self, f: &mut Formatter, strict: bool) -> Result { Result }
+}
+
+pub fn render(user: User, formatter: &mut Formatter) { user.fmt(formatter); }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "trait impl signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "User.fmt")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if strings.Contains(change.Name, "Display") {
+		t.Fatalf("trait impl method scoped to trait instead of implementing type: %#v", change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want render() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeArrowFunctionBodyChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
