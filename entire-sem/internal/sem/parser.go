@@ -135,6 +135,12 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		kind = methodKind(node, src)
 		name = nodeName(node, src)
 		name = qualify(scope, name)
+	case "property_signature":
+		if scope == "" || !typeSignatureFunctionLike(node) {
+			return Entity{}, false
+		}
+		kind = "method"
+		name = qualify(scope, nodeName(node, src))
 	case "type_spec", "type_alias_declaration":
 		kind = "type"
 		name = nodeName(node, src)
@@ -323,6 +329,27 @@ func hasNamedChildType(node *sitter.Node, nodeType string) bool {
 	return false
 }
 
+func hasNamedDescendantType(node *sitter.Node, nodeTypes ...string) bool {
+	if !validNode(node) {
+		return false
+	}
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if !validNode(child) {
+			continue
+		}
+		for _, nodeType := range nodeTypes {
+			if child.Type() == nodeType {
+				return true
+			}
+		}
+		if hasNamedDescendantType(child, nodeTypes...) {
+			return true
+		}
+	}
+	return false
+}
+
 func isNameNode(nodeType string) bool {
 	switch nodeType {
 	case "identifier", "type_identifier", "field_identifier", "property_identifier", "private_property_identifier", "package_identifier":
@@ -419,6 +446,10 @@ func functionLikeValue(node *sitter.Node) bool {
 
 func objectLikeValue(node *sitter.Node) bool {
 	return validNode(node) && node.Type() == "object"
+}
+
+func typeSignatureFunctionLike(node *sitter.Node) bool {
+	return hasNamedDescendantType(node, "function_type", "constructor_type", "call_signature")
 }
 
 func scopesChildren(kind string) bool {

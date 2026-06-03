@@ -332,6 +332,53 @@ function check(api: Api, value: string) { return api.validate(value) }
 	}
 }
 
+func TestAnalyzeGitRangeTypeScriptInterfaceFunctionPropertySignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `interface Api {
+  url: string
+  validate: (value: string) => boolean
+}
+
+function check(api: Api, value: string) { return api.validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `interface Api {
+  url: string
+  validate: (value: string, strict?: boolean) => boolean
+}
+
+function check(api: Api, value: string) { return api.validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "function property signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "Api.validate")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want check() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict?: boolean") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+	if scalar := findChange(result, "Api.url"); scalar.Name != "" {
+		t.Fatalf("non-function property produced change: %#v", scalar)
+	}
+}
+
 func TestAnalyzeGitRangeTypeScriptTypeLiteralMethodSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
@@ -1016,6 +1063,14 @@ func TestAnalyzeCheckpointResolvesAssociatedCommit(t *testing.T) {
 
 func requireChange(t *testing.T, result Result, name string) EntityChange {
 	t.Helper()
+	if change := findChange(result, name); change.Name != "" || change.NewName != "" {
+		return change
+	}
+	t.Fatalf("missing change %q in %#v", name, result.Files)
+	return EntityChange{}
+}
+
+func findChange(result Result, name string) EntityChange {
 	for _, file := range result.Files {
 		for _, change := range file.Changes {
 			if change.Name == name || change.NewName == name {
@@ -1023,7 +1078,6 @@ func requireChange(t *testing.T, result Result, name string) EntityChange {
 			}
 		}
 	}
-	t.Fatalf("missing change %q in %#v", name, result.Files)
 	return EntityChange{}
 }
 

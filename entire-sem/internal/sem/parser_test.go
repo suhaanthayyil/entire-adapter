@@ -282,8 +282,9 @@ func Format() {}
 			path:     "app.ts",
 			language: "TypeScript",
 			input: `interface Foo { value: string; validate(value: string): boolean }
+interface Api { request?: (path: string) => Promise<string> }
 type Bar = string
-type Contract = { parse(input: string): number }
+type Contract = { parse(input: string): number; load: (id: string) => string; label: string }
 abstract class Base { abstract run(value: string): boolean }
 class User {
   validate(value: string) { return value }
@@ -291,7 +292,7 @@ class User {
 }
 const build = (value: number) => value + 1
 `,
-			names: []string{"Foo", "Foo.validate", "Bar", "Contract", "Contract.parse", "Base", "Base.run", "User", "User.validate", "User.save", "build"},
+			names: []string{"Foo", "Foo.validate", "Api", "Api.request", "Bar", "Contract", "Contract.parse", "Contract.load", "Base", "Base.run", "User", "User.validate", "User.save", "build"},
 		},
 		{
 			path:     "lib.rs",
@@ -322,6 +323,39 @@ impl<T: Clone> IntoIterator for Bag<T> { fn into_iter(self) -> Iter<T> { todo!()
 			if !seen[name] {
 				t.Fatalf("%s missing entity %q in %#v", tt.path, name, entities)
 			}
+		}
+	}
+}
+
+func TestTreeSitterParserIgnoresNonFunctionTypeScriptProperties(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("app.ts", `interface Api {
+  url: string
+  request: (path: string) => Promise<string>
+}
+
+type Config = {
+  retries: number
+  onError?: (error: Error) => void
+}
+`)
+	if language != "TypeScript" {
+		t.Fatalf("language = %q", language)
+	}
+	seen := map[string]string{}
+	for _, entity := range entities {
+		seen[entity.Name] = entity.Kind
+	}
+	for name, kind := range map[string]string{
+		"Api.request":    "method",
+		"Config.onError": "method",
+	} {
+		if seen[name] != kind {
+			t.Fatalf("%s kind = %q, want %q in %#v", name, seen[name], kind, entities)
+		}
+	}
+	for _, name := range []string{"Api.url", "Config.retries"} {
+		if _, ok := seen[name]; ok {
+			t.Fatalf("non-function property %s leaked as entity in %#v", name, entities)
 		}
 	}
 }
