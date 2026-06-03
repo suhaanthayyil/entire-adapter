@@ -80,6 +80,46 @@ func TestAnalyzeGitRangeDependentCounts(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangePythonAssignedLambdaSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "auth.py", `validate_token = lambda token: bool(token)
+
+def check(token):
+    return validate_token(token)
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "auth.py", `validate_token = lambda token, *, issuer=None: bool(token)
+
+def check(token):
+    return validate_token(token)
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "lambda signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "validate_token")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want check() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "issuer=None") {
+		t.Fatalf("new signature missing issuer parameter: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeIgnoresPythonStringAndCommentDependents(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")

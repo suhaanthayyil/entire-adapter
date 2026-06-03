@@ -166,6 +166,17 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		}
 		kind = "function"
 		name = nodeName(node, src)
+	case "assignment":
+		value := assignmentValue(node)
+		if !functionLikeValue(value) {
+			return Entity{}, false
+		}
+		name = referenceName(assignmentTarget(node), src)
+		kind = "function"
+		if scope != "" {
+			kind = "method"
+			name = qualify(scope, name)
+		}
 	case "assignment_expression":
 		value := assignmentValue(node)
 		if !functionLikeValue(value) {
@@ -437,7 +448,7 @@ func functionLikeValue(node *sitter.Node) bool {
 		return false
 	}
 	switch node.Type() {
-	case "arrow_function", "function", "function_expression", "generator_function":
+	case "arrow_function", "function", "function_expression", "generator_function", "lambda":
 		return true
 	default:
 		return false

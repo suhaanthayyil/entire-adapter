@@ -143,6 +143,32 @@ func TestTreeSitterParserDoesNotScopeLocalFunctionsAsMethods(t *testing.T) {
 	}
 }
 
+func TestTreeSitterParserPythonAssignedLambdaEntities(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("pipeline.py", `validate_token = lambda token: bool(token)
+
+class Pipeline:
+    normalize = lambda self, value: value.strip()
+`)
+	if language != "Python" {
+		t.Fatalf("language = %q", language)
+	}
+	seen := map[string]string{}
+	for _, entity := range entities {
+		seen[entity.Name] = entity.Kind
+	}
+	for name, kind := range map[string]string{
+		"validate_token":     "function",
+		"Pipeline":           "class",
+		"Pipeline.normalize": "method",
+	} {
+		if seen[name] != kind {
+			t.Fatalf("%s kind = %q, want %q in %#v", name, seen[name], kind, entities)
+		}
+	}
+	assertEntitySignatureContains(t, entities, "validate_token", "lambda token")
+	assertEntitySignatureContains(t, entities, "Pipeline.normalize", "lambda self, value")
+}
+
 func TestTreeSitterParserTypeScriptAccessorsAndPrivateMembers(t *testing.T) {
 	entities, language := TreeSitterParser{}.Parse("user.ts", `class User {
   get name(): string { return "" }
