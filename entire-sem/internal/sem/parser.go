@@ -149,6 +149,17 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		}
 		kind = "function"
 		name = nodeName(node, src)
+	case "field_definition", "public_field_definition":
+		value := node.ChildByFieldName("value")
+		if !functionLikeValue(value) {
+			return Entity{}, false
+		}
+		kind = "function"
+		name = nodeName(node, src)
+		if scope != "" {
+			kind = "method"
+			name = qualify(scope, name)
+		}
 	default:
 		return Entity{}, false
 	}
@@ -197,15 +208,27 @@ func isNameNode(nodeType string) bool {
 func signatureFromNode(node *sitter.Node, src []byte) string {
 	start := node.StartByte()
 	end := node.EndByte()
-	if body := node.ChildByFieldName("body"); validNode(body) {
-		end = body.StartByte()
-	} else if body := firstBodyLikeChild(node); validNode(body) {
-		end = body.StartByte()
+	if value := node.ChildByFieldName("value"); functionLikeValue(value) {
+		if bodyStart, ok := functionBodyStart(value); ok {
+			end = bodyStart
+		}
+	} else if bodyStart, ok := functionBodyStart(node); ok {
+		end = bodyStart
 	}
 	if end <= start || int(end) > len(src) {
 		end = node.EndByte()
 	}
 	return normalizeSignature(string(src[start:end]))
+}
+
+func functionBodyStart(node *sitter.Node) (uint32, bool) {
+	if body := node.ChildByFieldName("body"); validNode(body) {
+		return body.StartByte(), true
+	}
+	if body := firstBodyLikeChild(node); validNode(body) {
+		return body.StartByte(), true
+	}
+	return 0, false
 }
 
 func firstBodyLikeChild(node *sitter.Node) *sitter.Node {

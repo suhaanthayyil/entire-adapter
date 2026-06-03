@@ -119,6 +119,47 @@ func TestAnalyzeGitRangeMultiLineSignatureChange(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangeArrowFunctionBodyChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `class User {
+  save = (value: string) => value
+}
+
+const build = (value: number) => value + 1
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `class User {
+  save = (value: string) => value.trim()
+}
+
+const build = (value: number) => value + 2
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "arrow body change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"build", "User.save"} {
+		change := requireChange(t, result, name)
+		if change.Type != "body_changed" {
+			t.Fatalf("%s change type = %q, want body_changed in %#v", name, change.Type, change)
+		}
+		if change.OldSignature != change.NewSignature {
+			t.Fatalf("%s signatures differ: %#v", name, change)
+		}
+	}
+}
+
 func TestAnalyzeGitRangeMarksAmbiguousMethodDependents(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")

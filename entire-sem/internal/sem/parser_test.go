@@ -121,10 +121,13 @@ func Format() {}
 			language: "TypeScript",
 			input: `interface Foo { value: string }
 type Bar = string
-class User { validate(value: string) { return value } }
+class User {
+  validate(value: string) { return value }
+  save = (value: string) => value
+}
 const build = (value: number) => value + 1
 `,
-			names: []string{"Foo", "Bar", "User", "User.validate", "build"},
+			names: []string{"Foo", "Bar", "User", "User.validate", "User.save", "build"},
 		},
 		{
 			path:     "lib.rs",
