@@ -630,6 +630,44 @@ function use(value) { return run(value) }
 	}
 }
 
+func TestAnalyzeGitRangeJavaScriptGeneratorFunctionSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "stream.js", `function* stream(values) { yield* values }
+
+function use(values) { return [...stream(values)] }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "stream.js", `function* stream(values, strict = false) { yield* values }
+
+function use(values) { return [...stream(values)] }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "generator signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "stream")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want use() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeJavaScriptDefaultExportBodyChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")

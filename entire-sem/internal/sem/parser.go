@@ -101,7 +101,7 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 			kind = "method"
 			name = qualify(scope, name)
 		}
-	case "function_declaration", "function_item":
+	case "function_declaration", "generator_function_declaration", "function_item":
 		kind = "function"
 		name = nodeName(node, src)
 		if scope != "" {

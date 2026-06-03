@@ -225,6 +225,7 @@ func TestTreeSitterParserJavaScriptAssignedAndDefaultFunctions(t *testing.T) {
 	entities, language := TreeSitterParser{}.Parse("exports.js", `module.exports = function(value) { return value }
 exports.run = (value) => value
 Foo.build = function(value) { return value }
+function* stream(value) { yield value }
 export default (value) => value
 `)
 	if language != "JavaScript" {
@@ -238,6 +239,7 @@ export default (value) => value
 		"module.exports": "function",
 		"exports.run":    "function",
 		"Foo.build":      "method",
+		"stream":         "function",
 		"default":        "function",
 	} {
 		if seen[name] != kind {
