@@ -29,3 +29,20 @@ jobs:
         run: python -m build
       - name: Check package metadata
         run: python -m twine check dist/*
+
+  entire-sem:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: entire-sem
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: entire-sem/go.mod
+          cache-dependency-path: entire-sem/go.sum
+      - name: Run tests
+        run: go test ./...
+      - name: Build plugin binary
+        run: go build -o /tmp/entire-sem ./cmd/entire-sem
