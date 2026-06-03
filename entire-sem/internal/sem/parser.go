@@ -93,7 +93,11 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 	switch node.Type() {
 	case "class_definition", "class_declaration", "abstract_class_declaration":
 		kind = "class"
-		name = nodeName(node, src)
+		if defaultExportClassDeclaration(node) && isDefaultExportDeclaration(node, src) {
+			name = "default"
+		} else {
+			name = nodeName(node, src)
+		}
 	case "function_definition":
 		kind = "function"
 		name = nodeName(node, src)
@@ -103,8 +107,12 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		}
 	case "function_declaration", "generator_function_declaration", "function_item":
 		kind = "function"
-		name = nodeName(node, src)
-		if scope != "" {
+		if defaultExportFunctionDeclaration(node) && isDefaultExportDeclaration(node, src) {
+			name = "default"
+		} else {
+			name = nodeName(node, src)
+		}
+		if scope != "" && name != "default" {
 			kind = "method"
 			name = qualify(scope, name)
 		}
@@ -327,6 +335,30 @@ func exportDefaultFunctionValue(node *sitter.Node, src []byte) *sitter.Node {
 	return nil
 }
 
+func defaultExportFunctionDeclaration(node *sitter.Node) bool {
+	if !validNode(node) {
+		return false
+	}
+	switch node.Type() {
+	case "function_declaration", "generator_function_declaration":
+		return true
+	default:
+		return false
+	}
+}
+
+func defaultExportClassDeclaration(node *sitter.Node) bool {
+	if !validNode(node) {
+		return false
+	}
+	switch node.Type() {
+	case "class_declaration", "abstract_class_declaration":
+		return true
+	default:
+		return false
+	}
+}
+
 func exportDefaultObjectValue(node *sitter.Node, src []byte) *sitter.Node {
 	if !strings.HasPrefix(normalize(node.Content(src)), "export default ") {
 		return nil
@@ -393,7 +425,7 @@ func methodKind(node *sitter.Node, src []byte) string {
 }
 
 func signatureFromNode(node *sitter.Node, src []byte) string {
-	start := signatureStartByte(node)
+	start := signatureStartByte(node, src)
 	end := node.EndByte()
 	if value := functionValueForSignature(node, src); functionLikeValue(value) {
 		if bodyStart, ok := functionBodyStart(value); ok {
@@ -421,12 +453,51 @@ func functionValueForSignature(node *sitter.Node, src []byte) *sitter.Node {
 	return nil
 }
 
-func signatureStartByte(node *sitter.Node) uint32 {
+func signatureStartByte(node *sitter.Node, src []byte) uint32 {
 	start := node.StartByte()
+	if exportStart, ok := defaultExportDeclarationStartByte(node, src); ok {
+		start = exportStart
+	}
 	for prev := node.PrevNamedSibling(); validNode(prev) && prev.Type() == "decorator"; prev = prev.PrevNamedSibling() {
 		start = prev.StartByte()
 	}
 	return start
+}
+
+func isDefaultExportDeclaration(node *sitter.Node, src []byte) bool {
+	_, ok := defaultExportDeclarationStartByte(node, src)
+	return ok
+}
+
+func defaultExportDeclarationStartByte(node *sitter.Node, src []byte) (uint32, bool) {
+	if !defaultExportFunctionDeclaration(node) && !defaultExportClassDeclaration(node) {
+		return 0, false
+	}
+	start := int(node.StartByte())
+	if start <= 0 || start > len(src) {
+		return 0, false
+	}
+	lineStart := start
+	for lineStart > 0 && src[lineStart-1] != '\n' && src[lineStart-1] != '\r' {
+		lineStart--
+	}
+	prefix := string(src[lineStart:start])
+	fields := strings.Fields(prefix)
+	if len(fields) < 2 || fields[0] != "export" || fields[1] != "default" {
+		return 0, false
+	}
+	for _, field := range fields[2:] {
+		switch field {
+		case "abstract", "async":
+		default:
+			return 0, false
+		}
+	}
+	exportOffset := strings.Index(prefix, "export")
+	if exportOffset < 0 {
+		return 0, false
+	}
+	return uint32(lineStart + exportOffset), true
 }
 
 func functionBodyStart(node *sitter.Node) (uint32, bool) {

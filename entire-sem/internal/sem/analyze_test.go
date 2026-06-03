@@ -699,6 +699,72 @@ func TestAnalyzeGitRangeJavaScriptDefaultExportBodyChange(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangeJavaScriptDefaultFunctionDeclarationBodyChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "main.js", `export default function render(value) { return value + 1 }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "main.js", `export default function render(value) { return value + 2 }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "default function body change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "default")
+	if change.Type != "body_changed" {
+		t.Fatalf("change type = %q, want body_changed in %#v", change.Type, change)
+	}
+	if change.OldSignature != change.NewSignature {
+		t.Fatalf("signatures differ: %#v", change)
+	}
+}
+
+func TestAnalyzeGitRangeJavaScriptDefaultClassMethodBodyChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "view.js", `export default class View {
+  render(value) { return value + 1 }
+}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "view.js", `export default class View {
+  render(value) { return value + 2 }
+}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "default class method body change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "default.render")
+	if change.Type != "body_changed" {
+		t.Fatalf("change type = %q, want body_changed in %#v", change.Type, change)
+	}
+	if change.OldSignature != change.NewSignature {
+		t.Fatalf("signatures differ: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeJavaScriptObjectFunctionSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")

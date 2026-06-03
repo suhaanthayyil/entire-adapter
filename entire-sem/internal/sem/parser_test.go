@@ -249,6 +249,125 @@ export default (value) => value
 	assertEntitySignatureContains(t, entities, "default", "export default")
 }
 
+func TestTreeSitterParserJavaScriptDefaultFunctionDeclarations(t *testing.T) {
+	tests := []struct {
+		name          string
+		path          string
+		input         string
+		language      string
+		localName     string
+		signatureWant string
+	}{
+		{
+			name:          "javascript function",
+			path:          "default.js",
+			input:         `export default function render(value) { return value }`,
+			language:      "JavaScript",
+			localName:     "render",
+			signatureWant: "export default function render",
+		},
+		{
+			name:          "javascript async function",
+			path:          "default.js",
+			input:         `export default async function load(value) { return value }`,
+			language:      "JavaScript",
+			localName:     "load",
+			signatureWant: "export default async function load",
+		},
+		{
+			name:          "javascript generator function",
+			path:          "default.js",
+			input:         `export default function* stream(value) { yield value }`,
+			language:      "JavaScript",
+			localName:     "stream",
+			signatureWant: "export default function* stream",
+		},
+		{
+			name:          "typescript function",
+			path:          "default.ts",
+			input:         `export default function render(value: string): string { return value }`,
+			language:      "TypeScript",
+			localName:     "render",
+			signatureWant: "export default function render",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entities, language := TreeSitterParser{}.Parse(tt.path, tt.input+"\n")
+			if language != tt.language {
+				t.Fatalf("language = %q", language)
+			}
+			seen := map[string]string{}
+			for _, entity := range entities {
+				seen[entity.Name] = entity.Kind
+			}
+			if seen["default"] != "function" {
+				t.Fatalf("default kind = %q, want function in %#v", seen["default"], entities)
+			}
+			if _, ok := seen[tt.localName]; ok {
+				t.Fatalf("named default export leaked local function entity in %#v", entities)
+			}
+			assertEntitySignatureContains(t, entities, "default", tt.signatureWant)
+		})
+	}
+}
+
+func TestTreeSitterParserDefaultClassDeclarations(t *testing.T) {
+	tests := []struct {
+		name         string
+		path         string
+		input        string
+		language     string
+		localName    string
+		methodName   string
+		methodKind   string
+		signatureTag string
+	}{
+		{
+			name:         "javascript class",
+			path:         "view.js",
+			input:        `export default class View { render(value) { return value } }`,
+			language:     "JavaScript",
+			localName:    "View",
+			methodName:   "default.render",
+			methodKind:   "method",
+			signatureTag: "export default class View",
+		},
+		{
+			name:         "typescript abstract class",
+			path:         "base.ts",
+			input:        `export default abstract class Base { abstract run(value: string): string }`,
+			language:     "TypeScript",
+			localName:    "Base",
+			methodName:   "default.run",
+			methodKind:   "method",
+			signatureTag: "export default abstract class Base",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entities, language := TreeSitterParser{}.Parse(tt.path, tt.input+"\n")
+			if language != tt.language {
+				t.Fatalf("language = %q", language)
+			}
+			seen := map[string]string{}
+			for _, entity := range entities {
+				seen[entity.Name] = entity.Kind
+			}
+			if seen["default"] != "class" {
+				t.Fatalf("default kind = %q, want class in %#v", seen["default"], entities)
+			}
+			if seen[tt.methodName] != tt.methodKind {
+				t.Fatalf("%s kind = %q, want %q in %#v", tt.methodName, seen[tt.methodName], tt.methodKind, entities)
+			}
+			if _, ok := seen[tt.localName]; ok {
+				t.Fatalf("named default export leaked local class entity in %#v", entities)
+			}
+			assertEntitySignatureContains(t, entities, "default", tt.signatureTag)
+		})
+	}
+}
+
 func TestTreeSitterParserJavaScriptObjectFunctionMembers(t *testing.T) {
 	entities, language := TreeSitterParser{}.Parse("api.js", `const api = {
   run(value) { return value },
