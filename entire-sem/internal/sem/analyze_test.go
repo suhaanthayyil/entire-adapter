@@ -80,6 +80,78 @@ func TestAnalyzeGitRangeDependentCounts(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangeIgnoresPythonStringAndCommentDependents(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "auth.py", `def validate_token(token):
+    return bool(token)
+`)
+	write(t, repo, "notes.py", `def mention_only():
+    note = "validate_token is mentioned, not called"
+    detail = '''validate_token in a doc string literal'''
+    # validate_token appears in a comment too
+    return note + detail
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "auth.py", `def validate_token(token, *, issuer=None):
+    return bool(token)
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "semantic change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "validate_token")
+	if change.DependentsCount != 0 {
+		t.Fatalf("dependents = %d, want 0 for string/comment mentions in %#v", change.DependentsCount, change)
+	}
+}
+
+func TestAnalyzeGitRangeIgnoresJavaScriptStringAndCommentDependents(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "api.js", `exports.run = (value) => value
+`)
+	write(t, repo, "notes.js", `function mentionOnly() {
+  const text = "run is mentioned, not called"
+  const template = `+"`run appears in a template literal`"+`
+  // run appears in a line comment
+  /* run appears in a block comment */
+  return text + template
+}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "api.js", `exports.run = (value, strict = false) => value
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "semantic change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "exports.run")
+	if change.DependentsCount != 0 {
+		t.Fatalf("dependents = %d, want 0 for string/comment mentions in %#v", change.DependentsCount, change)
+	}
+}
+
 func TestAnalyzeGitRangeMultiLineSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")

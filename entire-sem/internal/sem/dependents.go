@@ -2,6 +2,7 @@ package sem
 
 import (
 	"context"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -122,7 +123,7 @@ func buildReferenceIndex(ctx context.Context, repo, head string, targets map[str
 	targets = resolveReferenceAmbiguity(targets, shortCounts, seenEntityNames)
 	for _, parsed := range parsedFiles {
 		for _, entity := range parsed.Entities {
-			block := entityBlock(parsed.Lines, entity)
+			block := referenceBlock(parsed.Lines, entity, parsed.Path)
 			for key, target := range targets {
 				if isSameEntityReference(entity, target) {
 					continue
@@ -171,6 +172,125 @@ func entityBlock(lines []string, entity Entity) string {
 		return ""
 	}
 	return strings.Join(lines[start:end], "\n")
+}
+
+func referenceBlock(lines []string, entity Entity, path string) string {
+	return stripReferenceNoise(entityBlock(lines, entity), path)
+}
+
+func stripReferenceNoise(content, path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	out := []byte(content)
+	for i := 0; i < len(out); {
+		switch {
+		case ext == ".py" && out[i] == '#':
+			i = blankLineComment(out, i)
+		case supportsSlashComments(ext) && i+1 < len(out) && out[i] == '/' && out[i+1] == '/':
+			i = blankLineComment(out, i)
+		case supportsSlashComments(ext) && i+1 < len(out) && out[i] == '/' && out[i+1] == '*':
+			i = blankBlockComment(out, i)
+		case out[i] == '"':
+			i = blankQuoted(out, i, '"', ext == ".py" && hasRepeatedQuote(out, i, '"'))
+		case supportsSingleQuotedStrings(ext) && out[i] == '\'':
+			i = blankQuoted(out, i, '\'', ext == ".py" && hasRepeatedQuote(out, i, '\''))
+		case supportsBacktickStrings(ext) && out[i] == '`':
+			i = blankQuoted(out, i, '`', false)
+		default:
+			i++
+		}
+	}
+	return string(out)
+}
+
+func supportsSlashComments(ext string) bool {
+	switch ext {
+	case ".go", ".js", ".jsx", ".ts", ".tsx", ".rs":
+		return true
+	default:
+		return false
+	}
+}
+
+func supportsSingleQuotedStrings(ext string) bool {
+	switch ext {
+	case ".py", ".js", ".jsx", ".ts", ".tsx":
+		return true
+	default:
+		return false
+	}
+}
+
+func supportsBacktickStrings(ext string) bool {
+	switch ext {
+	case ".go", ".js", ".jsx", ".ts", ".tsx":
+		return true
+	default:
+		return false
+	}
+}
+
+func blankLineComment(out []byte, start int) int {
+	end := start
+	for end < len(out) && out[end] != '\n' {
+		end++
+	}
+	blankRange(out, start, end)
+	return end
+}
+
+func blankBlockComment(out []byte, start int) int {
+	end := start + 2
+	for end+1 < len(out) && !(out[end] == '*' && out[end+1] == '/') {
+		end++
+	}
+	if end+1 < len(out) {
+		end += 2
+	}
+	blankRange(out, start, end)
+	return end
+}
+
+func blankQuoted(out []byte, start int, quote byte, triple bool) int {
+	if triple {
+		end := start + 3
+		for end+2 < len(out) && !hasRepeatedQuote(out, end, quote) {
+			end++
+		}
+		if end+2 < len(out) {
+			end += 3
+		}
+		blankRange(out, start, end)
+		return end
+	}
+	end := start + 1
+	for end < len(out) {
+		if out[end] == '\\' && quote != '`' {
+			end += 2
+			continue
+		}
+		if out[end] == quote {
+			end++
+			break
+		}
+		end++
+	}
+	blankRange(out, start, end)
+	return end
+}
+
+func hasRepeatedQuote(out []byte, start int, quote byte) bool {
+	return start+2 < len(out) && out[start] == quote && out[start+1] == quote && out[start+2] == quote
+}
+
+func blankRange(out []byte, start, end int) {
+	if end > len(out) {
+		end = len(out)
+	}
+	for i := start; i < end; i++ {
+		if out[i] != '\n' && out[i] != '\r' {
+			out[i] = ' '
+		}
+	}
 }
 
 func containsIdentifier(content, name string) bool {
