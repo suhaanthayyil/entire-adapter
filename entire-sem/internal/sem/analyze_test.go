@@ -127,9 +127,10 @@ func TestAnalyzeGitRangeIgnoresJavaScriptStringAndCommentDependents(t *testing.T
 	write(t, repo, "notes.js", `function mentionOnly() {
   const text = "run is mentioned, not called"
   const template = `+"`run appears in a template literal`"+`
+  const interpolation = `+"`${\"run is still a string\"} ${/* run in an expression comment */ 0}`"+`
   // run appears in a line comment
   /* run appears in a block comment */
-  return text + template
+  return text + template + interpolation
 }
 `)
 	git(t, repo, "add", ".")
@@ -149,6 +150,61 @@ func TestAnalyzeGitRangeIgnoresJavaScriptStringAndCommentDependents(t *testing.T
 	change := requireChange(t, result, "exports.run")
 	if change.DependentsCount != 0 {
 		t.Fatalf("dependents = %d, want 0 for string/comment mentions in %#v", change.DependentsCount, change)
+	}
+}
+
+func TestAnalyzeGitRangeCountsJavaScriptTemplateExpressionDependents(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "api.js", `exports.run = (value) => value
+`)
+	write(t, repo, "use.js", "function render(value) {\n  return `${run(value)}`\n}\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "api.js", `exports.run = (value, strict = false) => value
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "semantic change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "exports.run")
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want render() in %#v", change.DependentsCount, change)
+	}
+}
+
+func TestAnalyzeGitRangeIgnoresGoRawStringTemplateSyntaxDependents(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "main.go", "package main\n\nfunc Run(value string) string { return value }\n\nfunc MentionOnly() string {\n\treturn `${Run(\"value\")}`\n}\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "main.go", "package main\n\nfunc Run(value string, strict bool) string { return value }\n\nfunc MentionOnly() string {\n\treturn `${Run(\"value\")}`\n}\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "semantic change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "Run")
+	if change.DependentsCount != 0 {
+		t.Fatalf("dependents = %d, want 0 for Go raw string mention in %#v", change.DependentsCount, change)
 	}
 }
 

@@ -193,7 +193,9 @@ func stripReferenceNoise(content, path string) string {
 			i = blankQuoted(out, i, '"', ext == ".py" && hasRepeatedQuote(out, i, '"'))
 		case supportsSingleQuotedStrings(ext) && out[i] == '\'':
 			i = blankQuoted(out, i, '\'', ext == ".py" && hasRepeatedQuote(out, i, '\''))
-		case supportsBacktickStrings(ext) && out[i] == '`':
+		case supportsTemplateStrings(ext) && out[i] == '`':
+			i = blankTemplateLiteral(out, i)
+		case ext == ".go" && out[i] == '`':
 			i = blankQuoted(out, i, '`', false)
 		default:
 			i++
@@ -220,9 +222,9 @@ func supportsSingleQuotedStrings(ext string) bool {
 	}
 }
 
-func supportsBacktickStrings(ext string) bool {
+func supportsTemplateStrings(ext string) bool {
 	switch ext {
-	case ".go", ".js", ".jsx", ".ts", ".tsx":
+	case ".js", ".jsx", ".ts", ".tsx":
 		return true
 	default:
 		return false
@@ -278,6 +280,58 @@ func blankQuoted(out []byte, start int, quote byte, triple bool) int {
 	return end
 }
 
+func blankTemplateLiteral(out []byte, start int) int {
+	blankByte(out, start)
+	i := start + 1
+	textStart := i
+	for i < len(out) {
+		switch {
+		case out[i] == '\\':
+			i += 2
+		case out[i] == '`':
+			blankRange(out, textStart, i+1)
+			return i + 1
+		case i+1 < len(out) && out[i] == '$' && out[i+1] == '{':
+			blankRange(out, textStart, i+2)
+			i = blankTemplateExpression(out, i+2)
+			textStart = i
+		default:
+			i++
+		}
+	}
+	blankRange(out, textStart, i)
+	return i
+}
+
+func blankTemplateExpression(out []byte, start int) int {
+	depth := 1
+	for i := start; i < len(out); {
+		switch {
+		case out[i] == '"' || out[i] == '\'':
+			i = blankQuoted(out, i, out[i], false)
+		case out[i] == '`':
+			i = blankTemplateLiteral(out, i)
+		case i+1 < len(out) && out[i] == '/' && out[i+1] == '/':
+			i = blankLineComment(out, i)
+		case i+1 < len(out) && out[i] == '/' && out[i+1] == '*':
+			i = blankBlockComment(out, i)
+		case out[i] == '{':
+			depth++
+			i++
+		case out[i] == '}':
+			depth--
+			if depth == 0 {
+				blankByte(out, i)
+				return i + 1
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	return len(out)
+}
+
 func hasRepeatedQuote(out []byte, start int, quote byte) bool {
 	return start+2 < len(out) && out[start] == quote && out[start+1] == quote && out[start+2] == quote
 }
@@ -290,6 +344,12 @@ func blankRange(out []byte, start, end int) {
 		if out[i] != '\n' && out[i] != '\r' {
 			out[i] = ' '
 		}
+	}
+}
+
+func blankByte(out []byte, index int) {
+	if index < len(out) && out[index] != '\n' && out[index] != '\r' {
+		out[index] = ' '
 	}
 }
 
