@@ -234,7 +234,7 @@ class _EntireSessionBridge:
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
         tool_use_id = safe_run_id(run_id)
-        started = self._tool_runs.get(tool_use_id, {})
+        started = self._tool_runs.pop(tool_use_id, {})
         tool_name = str(started.get("tool_name") or (metadata or {}).get("tool_name") or "tool")
         tool_input = started.get("tool_input")
         merged_metadata = dict(started.get("metadata") or {})

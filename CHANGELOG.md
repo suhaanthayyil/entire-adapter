@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 - 2026-06-03
+
+Reliability patch.
+
+- Clear completed tool-run context after `on_tool_end` and `on_tool_error` handling so long-running agents do not retain stale tool metadata.
+- Add regression coverage for duplicate or late tool-end events to ensure stale file/path inputs cannot leak into later checkpoints.
+
 ## 0.2.1 - 2026-05-19
 
 Documentation patch.

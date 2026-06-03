@@ -116,3 +116,31 @@ def test_legacy_checkpoint_on_tool_end_still_controls_default(tmp_path):
     handler.on_tool_end("ok", run_id="tool")
 
     assert [name for name, _ in calls] == ["session-start"]
+
+
+def test_tool_run_context_is_consumed_after_tool_end(tmp_path):
+    handler = EntireCallbackHandler(
+        session_id="tool-context-lifecycle",
+        repo_path=str(tmp_path),
+    )
+    calls = []
+    handler.bridge.client.emit_hook = lambda hook, payload: calls.append((hook, payload))  # type: ignore[method-assign]
+
+    handler.on_tool_start(
+        {"name": "Write"},
+        "{}",
+        run_id="shared-run",
+        inputs={"file_path": "src/app.py"},
+    )
+    handler.on_tool_end("ok", run_id="shared-run")
+
+    assert handler.bridge._tool_runs == {}
+
+    handler.on_tool_end("late duplicate", run_id="shared-run", tool_name="LateTool")
+
+    turn_ends = [payload for name, payload in calls if name == "turn-end"]
+    assert len(turn_ends) == 2
+    assert turn_ends[0]["tool_name"] == "Write"
+    assert turn_ends[0]["tool_input"] == {"file_path": "src/app.py"}
+    assert turn_ends[1]["tool_name"] == "LateTool"
+    assert turn_ends[1]["tool_input"] is None
