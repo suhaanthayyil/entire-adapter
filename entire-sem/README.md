@@ -89,7 +89,9 @@ checkpoint context at the entity level instead of stopping at "this file changed
 - parse the before and after git trees with tree-sitter
 - extract named entities like functions, classes, methods, structs, traits, and types
 - compare signatures and normalized bodies
-- build a heuristic dependent count from parsed references in the target tree
+- build a heuristic dependent count from parsed references in the target tree,
+  marking same-short-name method references as ambiguous when they cannot be
+  safely attributed
 - report added, removed, renamed, signature-changed, and body-changed entities
 
 The implementation does not copy or vendor Ataraxy Labs code. The parser dependency is
@@ -98,6 +100,8 @@ The implementation does not copy or vendor Ataraxy Labs code. The parser depende
 ## Current Limits
 
 - Dependent counts are heuristic, not compiler/type-checker accurate.
+- Method dependent counts are conservative when multiple changed entities share
+  the same short name.
 - Rename detection is heuristic.
 - Native `entire explain` / `entire rewind` rendering requires the matching Entire CLI
   bridge that invokes this plugin when it is installed.

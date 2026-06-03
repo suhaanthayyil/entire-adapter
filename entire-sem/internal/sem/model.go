@@ -13,17 +13,18 @@ type Entity struct {
 }
 
 type EntityChange struct {
-	Type            string  `json:"type"`
-	Kind            string  `json:"kind"`
-	Name            string  `json:"name"`
-	OldName         string  `json:"old_name,omitempty"`
-	NewName         string  `json:"new_name,omitempty"`
-	OldSignature    string  `json:"old_signature,omitempty"`
-	NewSignature    string  `json:"new_signature,omitempty"`
-	BeforeStartLine int     `json:"before_start_line,omitempty"`
-	AfterStartLine  int     `json:"after_start_line,omitempty"`
-	DependentsCount int     `json:"dependents_count"`
-	Similarity      float64 `json:"similarity,omitempty"`
+	Type                string  `json:"type"`
+	Kind                string  `json:"kind"`
+	Name                string  `json:"name"`
+	OldName             string  `json:"old_name,omitempty"`
+	NewName             string  `json:"new_name,omitempty"`
+	OldSignature        string  `json:"old_signature,omitempty"`
+	NewSignature        string  `json:"new_signature,omitempty"`
+	BeforeStartLine     int     `json:"before_start_line,omitempty"`
+	AfterStartLine      int     `json:"after_start_line,omitempty"`
+	DependentsCount     int     `json:"dependents_count"`
+	DependentsAmbiguous bool    `json:"dependents_ambiguous,omitempty"`
+	Similarity          float64 `json:"similarity,omitempty"`
 }
 
 type FileChange struct {

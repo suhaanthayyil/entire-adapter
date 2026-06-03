@@ -79,6 +79,98 @@ func TestAnalyzeGitRangeDependentCounts(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangeMarksAmbiguousMethodDependents(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "main.go", `package main
+
+type User struct{}
+type Order struct{}
+
+func (u User) Validate() bool { return true }
+func (o Order) Validate() bool { return true }
+
+func CheckUser(u User) bool { return u.Validate() }
+func CheckOrder(o Order) bool { return o.Validate() }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "main.go", `package main
+
+type User struct{}
+type Order struct{}
+
+func (u User) Validate(strict bool) bool { return strict }
+func (o Order) Validate(strict bool) bool { return strict }
+
+func CheckUser(u User) bool { return u.Validate() }
+func CheckOrder(o Order) bool { return o.Validate() }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "ambiguous methods")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"User.Validate", "Order.Validate"} {
+		change := requireChange(t, result, name)
+		if !change.DependentsAmbiguous {
+			t.Fatalf("%s should have ambiguous dependents: %#v", name, change)
+		}
+		if change.DependentsCount != 0 {
+			t.Fatalf("%s dependents = %d, want conservative 0 for unqualified ambiguous calls", name, change.DependentsCount)
+		}
+	}
+}
+
+func TestAnalyzeGitRangeCountsQualifiedAmbiguousDependents(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `class User { static validate(value: string) { return Boolean(value) } }
+class Order { static validate(value: string) { return Boolean(value) } }
+
+function checkUser(value: string) { return User.validate(value) }
+function checkOrder(value: string) { return Order.validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `class User { static validate(value: string, strict = false) { return Boolean(value) || strict } }
+class Order { static validate(value: string, strict = false) { return Boolean(value) || strict } }
+
+function checkUser(value: string) { return User.validate(value) }
+function checkOrder(value: string) { return Order.validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "qualified ambiguous methods")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"User.validate", "Order.validate"} {
+		change := requireChange(t, result, name)
+		if !change.DependentsAmbiguous {
+			t.Fatalf("%s should have ambiguous dependents: %#v", name, change)
+		}
+		if change.DependentsCount != 1 {
+			t.Fatalf("%s dependents = %d, want 1 qualified dependent", name, change.DependentsCount)
+		}
+	}
+}
+
 func TestAnalyzeCheckpointResolvesAssociatedCommit(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
@@ -103,6 +195,19 @@ func TestAnalyzeCheckpointResolvesAssociatedCommit(t *testing.T) {
 	if len(result.Files) != 1 {
 		t.Fatalf("files = %#v", result.Files)
 	}
+}
+
+func requireChange(t *testing.T, result Result, name string) EntityChange {
+	t.Helper()
+	for _, file := range result.Files {
+		for _, change := range file.Changes {
+			if change.Name == name || change.NewName == name {
+				return change
+			}
+		}
+	}
+	t.Fatalf("missing change %q in %#v", name, result.Files)
+	return EntityChange{}
 }
 
 func write(t *testing.T, repo, path, content string) {

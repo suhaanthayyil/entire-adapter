@@ -51,6 +51,15 @@ func dependentSuffix(change EntityChange) string {
 	if change.Type == "added" {
 		return ""
 	}
+	if change.DependentsAmbiguous {
+		if change.DependentsCount == 1 {
+			return " (1 qualified dependent; ambiguous short-name references ignored)"
+		}
+		if change.DependentsCount > 1 {
+			return fmt.Sprintf(" (%d qualified dependents; ambiguous short-name references ignored)", change.DependentsCount)
+		}
+		return " (ambiguous dependents)"
+	}
 	if change.DependentsCount == 1 {
 		return " (1 dependent)"
 	}

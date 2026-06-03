@@ -12,13 +12,19 @@ var identifierBoundary = regexp.MustCompile(`[A-Za-z0-9_$]+`)
 
 type referenceIndex map[string]map[string]struct{}
 
+type referenceTarget struct {
+	Name           string
+	ShortName      string
+	AmbiguousShort bool
+}
+
 func addDependentCounts(ctx context.Context, repo, head string, result *Result) error {
-	names := changedReferenceNames(*result)
-	if len(names) == 0 {
+	targets := changedReferenceTargets(*result)
+	if len(targets) == 0 {
 		return nil
 	}
 
-	index, err := buildReferenceIndex(ctx, repo, head, names)
+	index, err := buildReferenceIndex(ctx, repo, head, targets)
 	if err != nil {
 		return err
 	}
@@ -26,27 +32,46 @@ func addDependentCounts(ctx context.Context, repo, head string, result *Result) 
 	for fileIndex := range result.Files {
 		for changeIndex := range result.Files[fileIndex].Changes {
 			change := &result.Files[fileIndex].Changes[changeIndex]
-			name := referenceName(*change)
-			change.DependentsCount = len(index[name])
+			key := referenceKey(*change)
+			target, ok := targets[key]
+			if !ok {
+				continue
+			}
+			change.DependentsCount = len(index[key])
+			change.DependentsAmbiguous = target.AmbiguousShort
 		}
 	}
 	return nil
 }
 
-func changedReferenceNames(result Result) map[string]struct{} {
-	out := map[string]struct{}{}
+func changedReferenceTargets(result Result) map[string]referenceTarget {
+	names := map[string]string{}
+	shortCounts := map[string]int{}
 	for _, file := range result.Files {
 		for _, change := range file.Changes {
-			name := referenceName(change)
+			name := referenceEntityName(change)
 			if name != "" {
-				out[name] = struct{}{}
+				if _, exists := names[name]; !exists {
+					shortCounts[shortEntityName(name)]++
+				}
+				names[name] = name
 			}
 		}
 	}
-	return out
+
+	targets := map[string]referenceTarget{}
+	for key, name := range names {
+		shortName := shortEntityName(name)
+		targets[key] = referenceTarget{
+			Name:           name,
+			ShortName:      shortName,
+			AmbiguousShort: shortCounts[shortName] > 1,
+		}
+	}
+	return targets
 }
 
-func buildReferenceIndex(ctx context.Context, repo, head string, names map[string]struct{}) (referenceIndex, error) {
+func buildReferenceIndex(ctx context.Context, repo, head string, targets map[string]referenceTarget) (referenceIndex, error) {
 	files, err := gitutil.ListFiles(ctx, repo, head)
 	if err != nil {
 		return nil, err
@@ -54,8 +79,8 @@ func buildReferenceIndex(ctx context.Context, repo, head string, names map[strin
 
 	parser := TreeSitterParser{}
 	index := referenceIndex{}
-	for name := range names {
-		index[name] = map[string]struct{}{}
+	for key := range targets {
+		index[key] = map[string]struct{}{}
 	}
 
 	for _, path := range files {
@@ -74,12 +99,18 @@ func buildReferenceIndex(ctx context.Context, repo, head string, names map[strin
 		lines := strings.Split(content, "\n")
 		for _, entity := range entities {
 			block := entityBlock(lines, entity)
-			for name := range names {
-				if shortEntityName(entity.Name) == name {
+			for key, target := range targets {
+				if isSameEntityReference(entity, target) {
 					continue
 				}
-				if containsIdentifier(block, name) {
-					index[name][path+"#"+entity.Kind+":"+entity.Name] = struct{}{}
+				if target.AmbiguousShort && target.Name != target.ShortName {
+					if containsQualifiedReference(block, target.Name) {
+						index[key][path+"#"+entity.Kind+":"+entity.Name] = struct{}{}
+					}
+					continue
+				}
+				if containsIdentifier(block, target.ShortName) {
+					index[key][path+"#"+entity.Kind+":"+entity.Name] = struct{}{}
 				}
 			}
 		}
@@ -112,17 +143,46 @@ func containsIdentifier(content, name string) bool {
 	return false
 }
 
-func referenceName(change EntityChange) string {
+func containsQualifiedReference(content, name string) bool {
+	candidates := []string{name}
+	if strings.Contains(name, ".") {
+		candidates = append(candidates, strings.ReplaceAll(name, ".", "::"))
+	}
+	for _, candidate := range candidates {
+		if containsSymbolReference(content, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSymbolReference(content, symbol string) bool {
+	pattern := regexp.MustCompile(`(^|[^A-Za-z0-9_$])` + regexp.QuoteMeta(symbol) + `([^A-Za-z0-9_$]|$)`)
+	return pattern.FindStringIndex(content) != nil
+}
+
+func isSameEntityReference(entity Entity, target referenceTarget) bool {
+	if entity.Name == target.Name {
+		return true
+	}
+	return !target.AmbiguousShort && shortEntityName(entity.Name) == target.ShortName
+}
+
+func referenceKey(change EntityChange) string {
+	return referenceEntityName(change)
+}
+
+func referenceEntityName(change EntityChange) string {
 	switch change.Type {
 	case "renamed":
 		if change.NewName != "" {
-			return shortEntityName(change.NewName)
+			return change.NewName
 		}
 		if change.OldName != "" {
-			return shortEntityName(change.OldName)
+			return change.OldName
 		}
 	}
-	return shortEntityName(change.Name)
+	return change.Name
 }
 
 func shortEntityName(name string) string {
