@@ -76,6 +76,8 @@ func walkEntities(node *sitter.Node, src []byte, scope string, entities *[]Entit
 		*entities = append(*entities, entity)
 		if scopesChildren(entity.Kind) {
 			childScope = entity.Name
+		} else {
+			childScope = ""
 		}
 	} else if nextScope := scopeFromNode(node, src, scope); nextScope != "" {
 		childScope = nextScope

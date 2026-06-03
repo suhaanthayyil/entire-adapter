@@ -69,6 +69,34 @@ def added():
 	}
 }
 
+func TestTreeSitterParserDoesNotScopeLocalFunctionsAsMethods(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("worker.py", `class Runner:
+    def run(self):
+        def helper():
+            return True
+        return helper()
+`)
+	if language != "Python" {
+		t.Fatalf("language = %q", language)
+	}
+	seen := map[string]string{}
+	for _, entity := range entities {
+		seen[entity.Name] = entity.Kind
+	}
+	if seen["Runner"] != "class" {
+		t.Fatalf("missing Runner class in %#v", entities)
+	}
+	if seen["Runner.run"] != "method" {
+		t.Fatalf("missing Runner.run method in %#v", entities)
+	}
+	if seen["helper"] != "function" {
+		t.Fatalf("missing local helper function in %#v", entities)
+	}
+	if _, ok := seen["Runner.helper"]; ok {
+		t.Fatalf("local helper was incorrectly scoped as Runner.helper in %#v", entities)
+	}
+}
+
 func TestTreeSitterParserMultiLanguageEntities(t *testing.T) {
 	tests := []struct {
 		path     string
