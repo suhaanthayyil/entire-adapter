@@ -435,6 +435,36 @@ export declare const config: { build(value: string): string }
 	}
 }
 
+func TestTreeSitterParserTypeScriptEnumsAndNamespaces(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("api.ts", `export enum Status { Ready, Failed }
+
+declare namespace Api {
+  export function run(value: string): string
+  export const build: (value: string) => string
+}
+`)
+	if language != "TypeScript" {
+		t.Fatalf("language = %q", language)
+	}
+	for name, kind := range map[string]string{
+		"Status":    "enum",
+		"Api.run":   "method",
+		"Api.build": "method",
+	} {
+		if got := entityKind(entities, name); got != kind {
+			t.Fatalf("%s kind = %q, want %q in %#v", name, got, kind, entities)
+		}
+	}
+	for _, name := range []string{"run", "build"} {
+		if kind := entityKind(entities, name); kind != "" {
+			t.Fatalf("namespace member %s leaked as top-level kind %q in %#v", name, kind, entities)
+		}
+	}
+	assertEntitySignatureContains(t, entities, "Status", "export enum Status")
+	assertEntitySignatureContains(t, entities, "Api.run", "export function run")
+	assertEntitySignatureContains(t, entities, "Api.build", "export const build")
+}
+
 func TestTreeSitterParserJavaScriptObjectFunctionMembers(t *testing.T) {
 	entities, language := TreeSitterParser{}.Parse("api.js", `const api = {
   run(value) { return value },

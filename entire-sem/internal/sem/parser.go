@@ -164,7 +164,7 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 	case "struct_item":
 		kind = "struct"
 		name = nodeName(node, src)
-	case "enum_item":
+	case "enum_declaration", "enum_item":
 		kind = "enum"
 		name = nodeName(node, src)
 	case "trait_item":
@@ -177,6 +177,10 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		}
 		kind = "function"
 		name = nodeName(node, src)
+		if scope != "" {
+			kind = "method"
+			name = qualify(scope, name)
+		}
 	case "var_spec":
 		value := node.ChildByFieldName("value")
 		if !functionLikeValue(value) {
@@ -503,7 +507,7 @@ func declarationPrefixEligibleNode(node *sitter.Node) bool {
 		return false
 	}
 	switch node.Type() {
-	case "function_declaration", "generator_function_declaration", "function_signature", "class_declaration", "abstract_class_declaration", "interface_declaration", "type_alias_declaration", "variable_declarator":
+	case "function_declaration", "generator_function_declaration", "function_signature", "class_declaration", "abstract_class_declaration", "interface_declaration", "type_alias_declaration", "enum_declaration", "variable_declarator":
 		return true
 	default:
 		return false
@@ -527,7 +531,7 @@ func firstBodyLikeChild(node *sitter.Node) *sitter.Node {
 			continue
 		}
 		switch child.Type() {
-		case "block", "statement_block", "class_body", "declaration_list", "field_declaration_list", "interface_body":
+		case "block", "statement_block", "class_body", "declaration_list", "field_declaration_list", "interface_body", "enum_body":
 			return child
 		}
 	}
@@ -615,6 +619,8 @@ func scopeFromNode(node *sitter.Node, src []byte, parentScope string) string {
 	switch node.Type() {
 	case "impl_item":
 		return qualify(parentScope, rustImplName(node, src))
+	case "internal_module":
+		return qualify(parentScope, nodeName(node, src))
 	case "variable_declarator":
 		if objectLikeValue(node.ChildByFieldName("value")) {
 			return qualify(parentScope, nodeName(node, src))

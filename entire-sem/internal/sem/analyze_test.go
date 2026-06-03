@@ -834,6 +834,72 @@ func TestAnalyzeGitRangeTypeScriptAmbientConstFunctionSignatureChange(t *testing
 	}
 }
 
+func TestAnalyzeGitRangeTypeScriptEnumBodyChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "api.ts", `export enum Status { Ready }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "api.ts", `export enum Status { Ready, Failed }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "enum body change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "Status")
+	if change.Type != "body_changed" {
+		t.Fatalf("change type = %q, want body_changed in %#v", change.Type, change)
+	}
+	if change.OldSignature != change.NewSignature {
+		t.Fatalf("signatures differ: %#v", change)
+	}
+}
+
+func TestAnalyzeGitRangeTypeScriptNamespaceFunctionSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "api.d.ts", `declare namespace Api {
+  export function run(value: string): string
+}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "api.d.ts", `declare namespace Api {
+  export function run(value: string, strict?: boolean): string
+}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "namespace signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "Api.run")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict?: boolean") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeJavaScriptObjectFunctionSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
