@@ -203,6 +203,50 @@ function check(api: Api, value: string) { return api.validate(value) }
 	}
 }
 
+func TestAnalyzeGitRangeTypeScriptAccessorSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `class User {
+  get name(): string { return "" }
+  set name(value: string) {}
+}
+
+function render(user: User) { return user.name }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `class User {
+  get name(): string | undefined { return "" }
+  set name(value: string) {}
+}
+
+function render(user: User) { return user.name }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "getter signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChangeKind(t, result, "getter", "User.name")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want render() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "undefined") {
+		t.Fatalf("new signature missing return union: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeGoInterfaceMethodSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
@@ -534,6 +578,19 @@ func requireChange(t *testing.T, result Result, name string) EntityChange {
 		}
 	}
 	t.Fatalf("missing change %q in %#v", name, result.Files)
+	return EntityChange{}
+}
+
+func requireChangeKind(t *testing.T, result Result, kind, name string) EntityChange {
+	t.Helper()
+	for _, file := range result.Files {
+		for _, change := range file.Changes {
+			if change.Kind == kind && (change.Name == name || change.NewName == name) {
+				return change
+			}
+		}
+	}
+	t.Fatalf("missing %s change %q in %#v", kind, name, result.Files)
 	return EntityChange{}
 }
 

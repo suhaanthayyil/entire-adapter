@@ -122,7 +122,7 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 			name = qualify(receiver, name)
 		}
 	case "method_definition":
-		kind = "method"
+		kind = methodKind(node, src)
 		name = nodeName(node, src)
 		if scope != "" {
 			name = qualify(scope, name)
@@ -131,7 +131,7 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		if scope == "" {
 			return Entity{}, false
 		}
-		kind = "method"
+		kind = methodKind(node, src)
 		name = nodeName(node, src)
 		name = qualify(scope, name)
 	case "type_spec", "type_alias_declaration":
@@ -218,11 +218,23 @@ func hasNamedChildType(node *sitter.Node, nodeType string) bool {
 
 func isNameNode(nodeType string) bool {
 	switch nodeType {
-	case "identifier", "type_identifier", "field_identifier", "property_identifier", "package_identifier":
+	case "identifier", "type_identifier", "field_identifier", "property_identifier", "private_property_identifier", "package_identifier":
 		return true
 	default:
 		return false
 	}
+}
+
+func methodKind(node *sitter.Node, src []byte) string {
+	for _, token := range strings.Fields(signatureFromNode(node, src)) {
+		switch token {
+		case "get":
+			return "getter"
+		case "set":
+			return "setter"
+		}
+	}
+	return "method"
 }
 
 func signatureFromNode(node *sitter.Node, src []byte) string {

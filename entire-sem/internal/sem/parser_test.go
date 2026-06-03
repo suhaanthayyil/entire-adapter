@@ -97,6 +97,34 @@ func TestTreeSitterParserDoesNotScopeLocalFunctionsAsMethods(t *testing.T) {
 	}
 }
 
+func TestTreeSitterParserTypeScriptAccessorsAndPrivateMembers(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("user.ts", `class User {
+  get name(): string { return "" }
+  set name(value: string) {}
+  #secret(value: string) { return value }
+  #save = (value: string) => value
+}
+`)
+	if language != "TypeScript" {
+		t.Fatalf("language = %q", language)
+	}
+	seen := map[string]bool{}
+	for _, entity := range entities {
+		seen[entity.Kind+":"+entity.Name] = true
+	}
+	for _, want := range []string{
+		"class:User",
+		"getter:User.name",
+		"setter:User.name",
+		"method:User.#secret",
+		"method:User.#save",
+	} {
+		if !seen[want] {
+			t.Fatalf("missing %s in %#v", want, entities)
+		}
+	}
+}
+
 func TestTreeSitterParserMultiLanguageEntities(t *testing.T) {
 	tests := []struct {
 		path     string
