@@ -119,6 +119,49 @@ func TestAnalyzeGitRangeMultiLineSignatureChange(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangePythonDecoratorSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.py", `def build(value):
+    return value
+
+def use(value):
+    return build(value)
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.py", `@cache
+def build(value):
+    return value
+
+def use(value):
+    return build(value)
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "decorator signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "build")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want use() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "@cache") {
+		t.Fatalf("new signature missing decorator: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeTypeScriptInterfaceMethodSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
@@ -244,6 +287,49 @@ function render(user: User) { return user.name }
 	}
 	if !strings.Contains(change.NewSignature, "undefined") {
 		t.Fatalf("new signature missing return union: %#v", change)
+	}
+}
+
+func TestAnalyzeGitRangeTypeScriptMethodDecoratorSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `class User {
+  save(value: string) { return value }
+}
+
+function render(user: User) { return user.save("x") }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `class User {
+  @log
+  save(value: string) { return value }
+}
+
+function render(user: User) { return user.save("x") }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "decorator signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "User.save")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want render() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "@log") {
+		t.Fatalf("new signature missing decorator: %#v", change)
 	}
 }
 

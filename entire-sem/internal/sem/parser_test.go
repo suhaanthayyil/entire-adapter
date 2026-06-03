@@ -1,6 +1,9 @@
 package sem
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTreeSitterParserPythonEntities(t *testing.T) {
 	input := `class Token:
@@ -28,6 +31,35 @@ async def refresh_token(token):
 	if entities[2].Kind != "function" || entities[2].Name != "refresh_token" {
 		t.Fatalf("third entity = %#v", entities[2])
 	}
+}
+
+func TestTreeSitterParserIncludesDecoratorsInSignatures(t *testing.T) {
+	pythonEntities, language := TreeSitterParser{}.Parse("models.py", `@dataclass
+class User:
+    @classmethod
+    def from_id(cls, value):
+        return cls()
+
+@cache
+def build(value):
+    return value
+`)
+	if language != "Python" {
+		t.Fatalf("language = %q", language)
+	}
+	assertEntitySignatureContains(t, pythonEntities, "User", "@dataclass")
+	assertEntitySignatureContains(t, pythonEntities, "User.from_id", "@classmethod")
+	assertEntitySignatureContains(t, pythonEntities, "build", "@cache")
+
+	tsEntities, language := TreeSitterParser{}.Parse("user.ts", `class User {
+  @log
+  save(value: string) { return value }
+}
+`)
+	if language != "TypeScript" {
+		t.Fatalf("language = %q", language)
+	}
+	assertEntitySignatureContains(t, tsEntities, "User.save", "@log")
 }
 
 func TestCompareSignatureBodyRenameAddRemove(t *testing.T) {
@@ -67,6 +99,20 @@ def added():
 			t.Fatalf("missing %s in %#v", want, changes)
 		}
 	}
+}
+
+func assertEntitySignatureContains(t *testing.T, entities []Entity, name, want string) {
+	t.Helper()
+	for _, entity := range entities {
+		if entity.Name != name {
+			continue
+		}
+		if !strings.Contains(entity.Signature, want) {
+			t.Fatalf("%s signature = %q, want %q in %#v", name, entity.Signature, want, entity)
+		}
+		return
+	}
+	t.Fatalf("missing entity %q in %#v", name, entities)
 }
 
 func TestTreeSitterParserDoesNotScopeLocalFunctionsAsMethods(t *testing.T) {

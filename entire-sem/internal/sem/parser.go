@@ -238,7 +238,7 @@ func methodKind(node *sitter.Node, src []byte) string {
 }
 
 func signatureFromNode(node *sitter.Node, src []byte) string {
-	start := node.StartByte()
+	start := signatureStartByte(node)
 	end := node.EndByte()
 	if value := node.ChildByFieldName("value"); functionLikeValue(value) {
 		if bodyStart, ok := functionBodyStart(value); ok {
@@ -251,6 +251,14 @@ func signatureFromNode(node *sitter.Node, src []byte) string {
 		end = node.EndByte()
 	}
 	return normalizeSignature(string(src[start:end]))
+}
+
+func signatureStartByte(node *sitter.Node) uint32 {
+	start := node.StartByte()
+	for prev := node.PrevNamedSibling(); validNode(prev) && prev.Type() == "decorator"; prev = prev.PrevNamedSibling() {
+		start = prev.StartByte()
+	}
+	return start
 }
 
 func functionBodyStart(node *sitter.Node) (uint32, bool) {
