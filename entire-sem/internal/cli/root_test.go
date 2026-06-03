@@ -56,6 +56,35 @@ func TestAnalyzeJSONCommand(t *testing.T) {
 	}
 }
 
+func TestDiffPathSeparatorKeepsOptionLikePathspecs(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+	write(t, repo, "--base/auth.py", "def validate_token(token):\n    return bool(token)\n")
+	git(t, repo, "add", "--", "--base")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "--base/auth.py", "def validate_token(token, issuer=None):\n    return bool(token)\n")
+	git(t, repo, "add", "--", "--base")
+	git(t, repo, "commit", "-m", "update option-like path")
+	head := rev(t, repo, "HEAD")
+
+	var out bytes.Buffer
+	err := Run(t.Context(), Options{
+		Env:    EntireEnv{RepoRoot: repo},
+		Stdout: &out,
+		Stderr: &out,
+	}, []string{"diff", "--json", "--base", base, "--head", head, "--", "--base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"path": "--base/auth.py"`) {
+		t.Fatalf("diff json missing option-like path:\n%s", out.String())
+	}
+}
+
 func write(t *testing.T, repo, path, content string) {
 	t.Helper()
 	full := filepath.Join(repo, path)
@@ -75,4 +104,15 @@ func git(t *testing.T, repo string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+}
+
+func rev(t *testing.T, repo, value string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", value)
+	cmd.Dir = repo
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse %s: %v\n%s", value, err, out)
+	}
+	return string(out[:len(out)-1])
 }

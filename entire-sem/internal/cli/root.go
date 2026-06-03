@@ -95,43 +95,53 @@ type commonFlags struct {
 	JSON bool
 }
 
-func parseCommonFlags(args []string) (commonFlags, []string, error) {
-	var flags commonFlags
-	var rest []string
+type parsedCommonFlags struct {
+	Flags            commonFlags
+	Rest             []string
+	PathArgs         []string
+	HasPathSeparator bool
+}
+
+func parseCommonFlags(args []string) (parsedCommonFlags, error) {
+	var parsed parsedCommonFlags
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
 		case "--json":
-			flags.JSON = true
+			parsed.Flags.JSON = true
 		case "--repo":
 			i++
 			if i >= len(args) {
-				return flags, nil, errors.New("--repo requires a value")
+				return parsed, errors.New("--repo requires a value")
 			}
-			flags.Repo = args[i]
+			parsed.Flags.Repo = args[i]
 		case "--":
-			rest = append(rest, args[i+1:]...)
-			return flags, rest, nil
+			parsed.HasPathSeparator = true
+			parsed.PathArgs = append(parsed.PathArgs, args[i+1:]...)
+			return parsed, nil
 		default:
-			rest = append(rest, arg)
+			parsed.Rest = append(parsed.Rest, arg)
 		}
 	}
-	return flags, rest, nil
+	return parsed, nil
 }
 
 func runCommit(ctx context.Context, opts Options, args []string) error {
-	flags, rest, err := parseCommonFlags(args)
+	parsed, err := parseCommonFlags(args)
 	if err != nil {
 		return err
 	}
-	rev := "HEAD"
-	if len(rest) > 0 {
-		rev = rest[0]
+	if parsed.HasPathSeparator {
+		return errors.New("commit does not accept path arguments")
 	}
-	if len(rest) > 1 {
+	rev := "HEAD"
+	if len(parsed.Rest) > 0 {
+		rev = parsed.Rest[0]
+	}
+	if len(parsed.Rest) > 1 {
 		return errors.New("commit accepts at most one revision")
 	}
-	repo, err := resolveRepo(ctx, opts.Env, flags.Repo)
+	repo, err := resolveRepo(ctx, opts.Env, parsed.Flags.Repo)
 	if err != nil {
 		return err
 	}
@@ -139,26 +149,29 @@ func runCommit(ctx context.Context, opts Options, args []string) error {
 	if err != nil {
 		return err
 	}
-	return analyzeAndPrint(ctx, opts.Stdout, repo, base, rev, nil, flags.JSON)
+	return analyzeAndPrint(ctx, opts.Stdout, repo, base, rev, nil, parsed.Flags.JSON)
 }
 
 func runCheckpoint(ctx context.Context, opts Options, args []string) error {
-	flags, rest, err := parseCommonFlags(args)
+	parsed, err := parseCommonFlags(args)
 	if err != nil {
 		return err
 	}
-	if len(rest) != 1 {
+	if parsed.HasPathSeparator {
+		return errors.New("checkpoint does not accept path arguments")
+	}
+	if len(parsed.Rest) != 1 {
 		return errors.New("checkpoint requires exactly one checkpoint ID")
 	}
-	repo, err := resolveRepo(ctx, opts.Env, flags.Repo)
+	repo, err := resolveRepo(ctx, opts.Env, parsed.Flags.Repo)
 	if err != nil {
 		return err
 	}
-	result, err := sem.AnalyzeCheckpoint(ctx, repo, rest[0])
+	result, err := sem.AnalyzeCheckpoint(ctx, repo, parsed.Rest[0])
 	if err != nil {
 		return err
 	}
-	return printResult(opts.Stdout, result, flags.JSON)
+	return printResult(opts.Stdout, result, parsed.Flags.JSON)
 }
 
 func runAnalyze(ctx context.Context, opts Options, args []string) error {
@@ -166,7 +179,7 @@ func runAnalyze(ctx context.Context, opts Options, args []string) error {
 }
 
 func runDiff(ctx context.Context, opts Options, args []string) error {
-	flags, rest, err := parseCommonFlags(args)
+	parsed, err := parseCommonFlags(args)
 	if err != nil {
 		return err
 	}
@@ -174,30 +187,31 @@ func runDiff(ctx context.Context, opts Options, args []string) error {
 	base := "HEAD~1"
 	head := "HEAD"
 	var paths []string
-	for i := 0; i < len(rest); i++ {
-		switch rest[i] {
+	for i := 0; i < len(parsed.Rest); i++ {
+		switch parsed.Rest[i] {
 		case "--base":
 			i++
-			if i >= len(rest) {
+			if i >= len(parsed.Rest) {
 				return errors.New("--base requires a value")
 			}
-			base = rest[i]
+			base = parsed.Rest[i]
 		case "--head":
 			i++
-			if i >= len(rest) {
+			if i >= len(parsed.Rest) {
 				return errors.New("--head requires a value")
 			}
-			head = rest[i]
+			head = parsed.Rest[i]
 		default:
-			paths = append(paths, rest[i])
+			paths = append(paths, parsed.Rest[i])
 		}
 	}
+	paths = append(paths, parsed.PathArgs...)
 
-	repo, err := resolveRepo(ctx, opts.Env, flags.Repo)
+	repo, err := resolveRepo(ctx, opts.Env, parsed.Flags.Repo)
 	if err != nil {
 		return err
 	}
-	return analyzeAndPrint(ctx, opts.Stdout, repo, base, head, paths, flags.JSON)
+	return analyzeAndPrint(ctx, opts.Stdout, repo, base, head, paths, parsed.Flags.JSON)
 }
 
 func resolveRepo(ctx context.Context, env EntireEnv, explicit string) (string, error) {
