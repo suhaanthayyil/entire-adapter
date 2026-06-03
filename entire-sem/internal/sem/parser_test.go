@@ -368,6 +368,29 @@ func TestTreeSitterParserDefaultClassDeclarations(t *testing.T) {
 	}
 }
 
+func TestTreeSitterParserIncludesNamedExportModifiersInSignatures(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("exports.ts", `export function run(value: string): string { return value }
+export async function load(value: string): Promise<string> { return Promise.resolve(value) }
+export class View { render(value: string) { return value } }
+export interface Api { request(path: string): string }
+export type Handler = (value: string) => string
+export const build = (value: string) => value
+`)
+	if language != "TypeScript" {
+		t.Fatalf("language = %q", language)
+	}
+	for name, want := range map[string]string{
+		"run":     "export function run",
+		"load":    "export async function load",
+		"View":    "export class View",
+		"Api":     "export interface Api",
+		"Handler": "export type Handler",
+		"build":   "export const build",
+	} {
+		assertEntitySignatureContains(t, entities, name, want)
+	}
+}
+
 func TestTreeSitterParserJavaScriptObjectFunctionMembers(t *testing.T) {
 	entities, language := TreeSitterParser{}.Parse("api.js", `const api = {
   run(value) { return value },

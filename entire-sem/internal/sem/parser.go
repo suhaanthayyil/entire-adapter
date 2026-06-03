@@ -455,7 +455,7 @@ func functionValueForSignature(node *sitter.Node, src []byte) *sitter.Node {
 
 func signatureStartByte(node *sitter.Node, src []byte) uint32 {
 	start := node.StartByte()
-	if exportStart, ok := defaultExportDeclarationStartByte(node, src); ok {
+	if exportStart, ok := exportDeclarationStartByte(node, src); ok {
 		start = exportStart
 	}
 	for prev := node.PrevNamedSibling(); validNode(prev) && prev.Type() == "decorator"; prev = prev.PrevNamedSibling() {
@@ -465,17 +465,22 @@ func signatureStartByte(node *sitter.Node, src []byte) uint32 {
 }
 
 func isDefaultExportDeclaration(node *sitter.Node, src []byte) bool {
-	_, ok := defaultExportDeclarationStartByte(node, src)
-	return ok
+	_, fields, ok := exportDeclarationPrefix(node, src)
+	return ok && len(fields) > 1 && fields[1] == "default"
 }
 
-func defaultExportDeclarationStartByte(node *sitter.Node, src []byte) (uint32, bool) {
-	if !defaultExportFunctionDeclaration(node) && !defaultExportClassDeclaration(node) {
-		return 0, false
+func exportDeclarationStartByte(node *sitter.Node, src []byte) (uint32, bool) {
+	start, _, ok := exportDeclarationPrefix(node, src)
+	return start, ok
+}
+
+func exportDeclarationPrefix(node *sitter.Node, src []byte) (uint32, []string, bool) {
+	if !exportPrefixEligibleNode(node) {
+		return 0, nil, false
 	}
 	start := int(node.StartByte())
 	if start <= 0 || start > len(src) {
-		return 0, false
+		return 0, nil, false
 	}
 	lineStart := start
 	for lineStart > 0 && src[lineStart-1] != '\n' && src[lineStart-1] != '\r' {
@@ -483,21 +488,26 @@ func defaultExportDeclarationStartByte(node *sitter.Node, src []byte) (uint32, b
 	}
 	prefix := string(src[lineStart:start])
 	fields := strings.Fields(prefix)
-	if len(fields) < 2 || fields[0] != "export" || fields[1] != "default" {
-		return 0, false
-	}
-	for _, field := range fields[2:] {
-		switch field {
-		case "abstract", "async":
-		default:
-			return 0, false
-		}
+	if len(fields) == 0 || fields[0] != "export" {
+		return 0, nil, false
 	}
 	exportOffset := strings.Index(prefix, "export")
 	if exportOffset < 0 {
-		return 0, false
+		return 0, nil, false
 	}
-	return uint32(lineStart + exportOffset), true
+	return uint32(lineStart + exportOffset), fields, true
+}
+
+func exportPrefixEligibleNode(node *sitter.Node) bool {
+	if !validNode(node) {
+		return false
+	}
+	switch node.Type() {
+	case "function_declaration", "generator_function_declaration", "class_declaration", "abstract_class_declaration", "interface_declaration", "type_alias_declaration", "variable_declarator":
+		return true
+	default:
+		return false
+	}
 }
 
 func functionBodyStart(node *sitter.Node) (uint32, bool) {

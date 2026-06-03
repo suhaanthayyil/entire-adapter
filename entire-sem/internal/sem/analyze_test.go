@@ -765,6 +765,44 @@ func TestAnalyzeGitRangeJavaScriptDefaultClassMethodBodyChange(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangeJavaScriptNamedExportModifierSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "api.js", `function run(value) { return value }
+const build = (value) => value
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "api.js", `export function run(value) { return value }
+export const build = (value) => value
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "export run")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"run":   "export function run",
+		"build": "export const build",
+	} {
+		change := requireChange(t, result, name)
+		if change.Type != "signature_changed" {
+			t.Fatalf("%s change type = %q, want signature_changed in %#v", name, change.Type, change)
+		}
+		if !strings.Contains(change.NewSignature, want) {
+			t.Fatalf("%s new signature missing export modifier: %#v", name, change)
+		}
+	}
+}
+
 func TestAnalyzeGitRangeJavaScriptObjectFunctionSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
