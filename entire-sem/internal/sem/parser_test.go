@@ -197,6 +197,49 @@ export default (value) => value
 	assertEntitySignatureContains(t, entities, "default", "export default")
 }
 
+func TestTreeSitterParserJavaScriptObjectFunctionMembers(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("api.js", `const api = {
+  run(value) { return value },
+  save: (value) => value,
+  load: function(value) { return value },
+  get name() { return "" },
+  nested: {
+    parse(value) { return value },
+  },
+}
+
+module.exports = {
+  build(value) { return value },
+  create: (value) => value,
+}
+
+export default {
+  render(value) { return value },
+}
+`)
+	if language != "JavaScript" {
+		t.Fatalf("language = %q", language)
+	}
+	seen := map[string]string{}
+	for _, entity := range entities {
+		seen[entity.Name] = entity.Kind
+	}
+	for name, kind := range map[string]string{
+		"api.run":               "method",
+		"api.save":              "method",
+		"api.load":              "method",
+		"api.name":              "getter",
+		"api.nested.parse":      "method",
+		"module.exports.build":  "method",
+		"module.exports.create": "method",
+		"default.render":        "method",
+	} {
+		if seen[name] != kind {
+			t.Fatalf("%s kind = %q, want %q in %#v", name, seen[name], kind, entities)
+		}
+	}
+}
+
 func TestTreeSitterParserMultiLanguageEntities(t *testing.T) {
 	tests := []struct {
 		path     string

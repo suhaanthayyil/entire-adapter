@@ -160,12 +160,22 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		kind = "function"
 		name = nodeName(node, src)
 	case "assignment_expression":
-		value := assignedFunctionValue(node)
+		value := assignmentValue(node)
 		if !functionLikeValue(value) {
 			return Entity{}, false
 		}
 		name = referenceName(assignmentTarget(node), src)
 		kind = assignedFunctionKind(name)
+	case "pair":
+		if scope == "" {
+			return Entity{}, false
+		}
+		value := objectPairValue(node)
+		if !functionLikeValue(value) {
+			return Entity{}, false
+		}
+		kind = "method"
+		name = qualify(scope, nodeName(node, src))
 	case "field_definition", "public_field_definition":
 		value := node.ChildByFieldName("value")
 		if !functionLikeValue(value) {
@@ -229,8 +239,18 @@ func assignmentTarget(node *sitter.Node) *sitter.Node {
 	return nil
 }
 
-func assignedFunctionValue(node *sitter.Node) *sitter.Node {
+func assignmentValue(node *sitter.Node) *sitter.Node {
 	if value := node.ChildByFieldName("right"); validNode(value) {
+		return value
+	}
+	if node.NamedChildCount() > 1 {
+		return node.NamedChild(1)
+	}
+	return nil
+}
+
+func objectPairValue(node *sitter.Node) *sitter.Node {
+	if value := node.ChildByFieldName("value"); validNode(value) {
 		return value
 	}
 	if node.NamedChildCount() > 1 {
@@ -273,6 +293,19 @@ func exportDefaultFunctionValue(node *sitter.Node, src []byte) *sitter.Node {
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
 		if functionLikeValue(child) {
+			return child
+		}
+	}
+	return nil
+}
+
+func exportDefaultObjectValue(node *sitter.Node, src []byte) *sitter.Node {
+	if !strings.HasPrefix(normalize(node.Content(src)), "export default ") {
+		return nil
+	}
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if objectLikeValue(child) {
 			return child
 		}
 	}
@@ -330,7 +363,7 @@ func functionValueForSignature(node *sitter.Node, src []byte) *sitter.Node {
 	if value := node.ChildByFieldName("value"); functionLikeValue(value) {
 		return value
 	}
-	if value := assignedFunctionValue(node); functionLikeValue(value) {
+	if value := assignmentValue(node); functionLikeValue(value) {
 		return value
 	}
 	if value := exportDefaultFunctionValue(node, src); functionLikeValue(value) {
@@ -383,6 +416,10 @@ func functionLikeValue(node *sitter.Node) bool {
 	}
 }
 
+func objectLikeValue(node *sitter.Node) bool {
+	return validNode(node) && node.Type() == "object"
+}
+
 func scopesChildren(kind string) bool {
 	switch kind {
 	case "class", "struct", "trait", "interface":
@@ -396,9 +433,25 @@ func scopeFromNode(node *sitter.Node, src []byte, parentScope string) string {
 	switch node.Type() {
 	case "impl_item":
 		return qualify(parentScope, rustImplName(node, src))
+	case "variable_declarator":
+		if objectLikeValue(node.ChildByFieldName("value")) {
+			return qualify(parentScope, nodeName(node, src))
+		}
+	case "assignment_expression":
+		if objectLikeValue(assignmentValue(node)) {
+			return qualify(parentScope, referenceName(assignmentTarget(node), src))
+		}
+	case "export_statement":
+		if objectLikeValue(exportDefaultObjectValue(node, src)) {
+			return qualify(parentScope, "default")
+		}
+	case "pair":
+		if scopeName := qualify(parentScope, nodeName(node, src)); parentScope != "" && objectLikeValue(objectPairValue(node)) {
+			return scopeName
+		}
 	default:
-		return ""
 	}
+	return ""
 }
 
 func rustImplName(node *sitter.Node, src []byte) string {
