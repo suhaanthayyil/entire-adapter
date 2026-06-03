@@ -128,6 +128,10 @@ func buildReferenceIndex(ctx context.Context, repo, head string, targets map[str
 				if isSameEntityReference(entity, target) {
 					continue
 				}
+				if containsConstructorReference(block, target.Name) {
+					index[key][parsed.Path+"#"+entity.Kind+":"+entity.Name] = struct{}{}
+					continue
+				}
 				if target.AmbiguousShort && target.Name != target.ShortName {
 					if containsQualifiedReference(block, target.Name) {
 						index[key][parsed.Path+"#"+entity.Kind+":"+entity.Name] = struct{}{}
@@ -373,6 +377,19 @@ func containsQualifiedReference(content, name string) bool {
 		}
 	}
 	return false
+}
+
+func containsConstructorReference(content, name string) bool {
+	owner, ok := strings.CutSuffix(name, ".constructor")
+	if !ok || owner == "" {
+		return false
+	}
+	return containsNewExpression(content, owner)
+}
+
+func containsNewExpression(content, name string) bool {
+	pattern := regexp.MustCompile(`(^|[^A-Za-z0-9_$])new\s+` + regexp.QuoteMeta(name) + `([^A-Za-z0-9_$]|$)`)
+	return pattern.FindStringIndex(content) != nil
 }
 
 func containsSymbolReference(content, symbol string) bool {

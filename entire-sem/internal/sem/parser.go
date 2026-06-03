@@ -127,6 +127,9 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		}
 		kind = methodKind(node, src)
 		name = nodeName(node, src)
+		if name == "constructor" {
+			kind = "constructor"
+		}
 		name = qualify(scope, name)
 	case "method_signature", "abstract_method_signature", "method_elem":
 		if scope == "" {
@@ -232,7 +235,7 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 }
 
 func nodeName(node *sitter.Node, src []byte) string {
-	for _, field := range []string{"name", "property", "type"} {
+	for _, field := range []string{"name", "property", "type", "constructor"} {
 		child := node.ChildByFieldName(field)
 		if validNode(child) {
 			return child.Content(src)

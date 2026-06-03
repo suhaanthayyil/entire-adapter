@@ -505,6 +505,50 @@ function render(user: User) { return user.name }
 	}
 }
 
+func TestAnalyzeGitRangeTypeScriptConstructorSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `class User {
+  constructor(id: string) {}
+}
+
+function build() { return new User("1") }
+function mentionOnly() { return "new User()" }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `class User {
+  constructor(id: string, strict = false) {}
+}
+
+function build() { return new User("1") }
+function mentionOnly() { return "new User()" }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "constructor signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChangeKind(t, result, "constructor", "User.constructor")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want build() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeTypeScriptMethodDecoratorSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")

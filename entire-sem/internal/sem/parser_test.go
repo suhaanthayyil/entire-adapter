@@ -171,6 +171,7 @@ class Pipeline:
 
 func TestTreeSitterParserTypeScriptAccessorsAndPrivateMembers(t *testing.T) {
 	entities, language := TreeSitterParser{}.Parse("user.ts", `class User {
+  constructor(id: string) {}
   get name(): string { return "" }
   set name(value: string) {}
   #secret(value: string) { return value }
@@ -186,6 +187,7 @@ func TestTreeSitterParserTypeScriptAccessorsAndPrivateMembers(t *testing.T) {
 	}
 	for _, want := range []string{
 		"class:User",
+		"constructor:User.constructor",
 		"getter:User.name",
 		"setter:User.name",
 		"method:User.#secret",
