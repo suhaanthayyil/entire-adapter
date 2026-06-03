@@ -18,13 +18,19 @@ type referenceTarget struct {
 	AmbiguousShort bool
 }
 
+type parsedReferenceFile struct {
+	Path     string
+	Lines    []string
+	Entities []Entity
+}
+
 func addDependentCounts(ctx context.Context, repo, head string, result *Result) error {
 	targets := changedReferenceTargets(*result)
 	if len(targets) == 0 {
 		return nil
 	}
 
-	index, err := buildReferenceIndex(ctx, repo, head, targets)
+	index, targets, err := buildReferenceIndex(ctx, repo, head, targets)
 	if err != nil {
 		return err
 	}
@@ -71,10 +77,10 @@ func changedReferenceTargets(result Result) map[string]referenceTarget {
 	return targets
 }
 
-func buildReferenceIndex(ctx context.Context, repo, head string, targets map[string]referenceTarget) (referenceIndex, error) {
+func buildReferenceIndex(ctx context.Context, repo, head string, targets map[string]referenceTarget) (referenceIndex, map[string]referenceTarget, error) {
 	files, err := gitutil.ListFiles(ctx, repo, head)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	parser := TreeSitterParser{}
@@ -83,40 +89,73 @@ func buildReferenceIndex(ctx context.Context, repo, head string, targets map[str
 		index[key] = map[string]struct{}{}
 	}
 
+	var parsedFiles []parsedReferenceFile
+	seenEntityNames := map[string]struct{}{}
+	shortCounts := map[string]int{}
 	for _, path := range files {
 		if !Supported(path) {
 			continue
 		}
 		content, ok, err := gitutil.ShowFile(ctx, repo, head, path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !ok {
 			continue
 		}
 
 		entities, _ := parser.Parse(path, content)
-		lines := strings.Split(content, "\n")
 		for _, entity := range entities {
-			block := entityBlock(lines, entity)
+			if _, exists := seenEntityNames[entity.Name]; exists {
+				continue
+			}
+			seenEntityNames[entity.Name] = struct{}{}
+			shortCounts[shortEntityName(entity.Name)]++
+		}
+		parsedFiles = append(parsedFiles, parsedReferenceFile{
+			Path:     path,
+			Lines:    strings.Split(content, "\n"),
+			Entities: entities,
+		})
+	}
+
+	targets = resolveReferenceAmbiguity(targets, shortCounts, seenEntityNames)
+	for _, parsed := range parsedFiles {
+		for _, entity := range parsed.Entities {
+			block := entityBlock(parsed.Lines, entity)
 			for key, target := range targets {
 				if isSameEntityReference(entity, target) {
 					continue
 				}
 				if target.AmbiguousShort && target.Name != target.ShortName {
 					if containsQualifiedReference(block, target.Name) {
-						index[key][path+"#"+entity.Kind+":"+entity.Name] = struct{}{}
+						index[key][parsed.Path+"#"+entity.Kind+":"+entity.Name] = struct{}{}
 					}
 					continue
 				}
 				if containsIdentifier(block, target.ShortName) {
-					index[key][path+"#"+entity.Kind+":"+entity.Name] = struct{}{}
+					index[key][parsed.Path+"#"+entity.Kind+":"+entity.Name] = struct{}{}
 				}
 			}
 		}
 	}
 
-	return index, nil
+	return index, targets, nil
+}
+
+func resolveReferenceAmbiguity(targets map[string]referenceTarget, shortCounts map[string]int, entityNames map[string]struct{}) map[string]referenceTarget {
+	resolved := make(map[string]referenceTarget, len(targets))
+	for key, target := range targets {
+		count := shortCounts[target.ShortName]
+		if _, exists := entityNames[target.Name]; !exists {
+			count++
+		}
+		if count > 1 {
+			target.AmbiguousShort = true
+		}
+		resolved[key] = target
+	}
+	return resolved
 }
 
 func entityBlock(lines []string, entity Entity) string {
@@ -165,7 +204,7 @@ func isSameEntityReference(entity Entity, target referenceTarget) bool {
 	if entity.Name == target.Name {
 		return true
 	}
-	return !target.AmbiguousShort && shortEntityName(entity.Name) == target.ShortName
+	return scopesChildren(entity.Kind) && strings.HasPrefix(target.Name, entity.Name+".")
 }
 
 func referenceKey(change EntityChange) string {

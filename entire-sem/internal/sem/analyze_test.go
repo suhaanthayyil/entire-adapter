@@ -160,6 +160,45 @@ const build = (value: number) => value + 2
 	}
 }
 
+func TestAnalyzeGitRangeDoesNotCountContainingClassAsDependent(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `class User {
+  static validate(value: string) { return Boolean(value) }
+}
+
+function checkUser(value: string) { return User.validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `class User {
+  static validate(value: string, strict = false) { return Boolean(value) || strict }
+}
+
+function checkUser(value: string) { return User.validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "method signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "User.validate")
+	if change.DependentsAmbiguous {
+		t.Fatalf("dependents should not be ambiguous: %#v", change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want only checkUser in %#v", change.DependentsCount, change)
+	}
+}
+
 func TestAnalyzeGitRangeMarksAmbiguousMethodDependents(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
@@ -208,6 +247,87 @@ func CheckOrder(o Order) bool { return o.Validate() }
 		if change.DependentsCount != 0 {
 			t.Fatalf("%s dependents = %d, want conservative 0 for unqualified ambiguous calls", name, change.DependentsCount)
 		}
+	}
+}
+
+func TestAnalyzeGitRangeMarksUnchangedShortNameAsAmbiguous(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `class User { static validate(value: string) { return Boolean(value) } }
+class Order { static validate(value: string) { return Boolean(value) } }
+
+function checkUser(value: string) { return User.validate(value) }
+function checkLoose(value: string) { return validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `class User { static validate(value: string, strict = false) { return Boolean(value) || strict } }
+class Order { static validate(value: string) { return Boolean(value) } }
+
+function checkUser(value: string) { return User.validate(value) }
+function checkLoose(value: string) { return validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "one method signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "User.validate")
+	if !change.DependentsAmbiguous {
+		t.Fatalf("dependents should be ambiguous because Order.validate still exists: %#v", change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want only qualified checkUser in %#v", change.DependentsCount, change)
+	}
+}
+
+func TestAnalyzeGitRangeMarksRemovedShortNameAsAmbiguous(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `class User { static validate(value: string) { return Boolean(value) } }
+class Order { static validate(value: string) { return Boolean(value) } }
+
+function checkUser(value: string) { return User.validate(value) }
+function checkLoose(value: string) { return validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `class User {}
+class Order { static validate(value: string) { return Boolean(value) } }
+
+function checkUser(value: string) { return User.validate(value) }
+function checkLoose(value: string) { return validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "remove one method")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "User.validate")
+	if change.Type != "removed" {
+		t.Fatalf("change type = %q, want removed in %#v", change.Type, change)
+	}
+	if !change.DependentsAmbiguous {
+		t.Fatalf("dependents should be ambiguous because Order.validate still exists: %#v", change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want only qualified checkUser in %#v", change.DependentsCount, change)
 	}
 }
 
