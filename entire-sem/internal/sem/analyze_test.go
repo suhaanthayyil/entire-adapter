@@ -592,6 +592,41 @@ function render(user: User) { return user.save("x") }
 	}
 }
 
+func TestAnalyzeGitRangeTypeScriptMemberModifierSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `class User {
+  validate(value: string) { return Boolean(value) }
+}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `class User {
+  static validate(value: string) { return Boolean(value) }
+}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "static modifier")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "User.validate")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if !strings.Contains(change.NewSignature, "static validate") {
+		t.Fatalf("new signature missing static modifier: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeJavaScriptAssignedFunctionSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
@@ -750,6 +785,41 @@ func TestAnalyzeGitRangeJavaScriptDefaultClassMethodBodyChange(t *testing.T) {
 `)
 	git(t, repo, "add", ".")
 	git(t, repo, "commit", "-m", "default class method body change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "default.render")
+	if change.Type != "body_changed" {
+		t.Fatalf("change type = %q, want body_changed in %#v", change.Type, change)
+	}
+	if change.OldSignature != change.NewSignature {
+		t.Fatalf("signatures differ: %#v", change)
+	}
+}
+
+func TestAnalyzeGitRangeJavaScriptAnonymousDefaultClassMethodBodyChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "view.js", `export default class {
+  render(value) { return value + 1 }
+}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "view.js", `export default class {
+  render(value) { return value + 2 }
+}
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "anonymous default class method body change")
 	head := rev(t, repo, "HEAD")
 
 	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)

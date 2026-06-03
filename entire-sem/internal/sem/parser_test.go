@@ -230,6 +230,30 @@ func TestTreeSitterParserTypeScriptAccessorsAndPrivateMembers(t *testing.T) {
 	}
 }
 
+func TestTreeSitterParserTypeScriptMemberModifiersInSignatures(t *testing.T) {
+	entities, language := TreeSitterParser{}.Parse("user.ts", `abstract class Base {
+  protected abstract run(value: string): string
+}
+
+class User {
+  public static validate(value: string) { return Boolean(value) }
+  private save(value: string) { return value }
+  readonly build = (value: string) => value
+}
+`)
+	if language != "TypeScript" {
+		t.Fatalf("language = %q", language)
+	}
+	for name, want := range map[string]string{
+		"Base.run":      "protected abstract run",
+		"User.validate": "public static validate",
+		"User.save":     "private save",
+		"User.build":    "readonly build",
+	} {
+		assertEntitySignatureContains(t, entities, name, want)
+	}
+}
+
 func TestTreeSitterParserJavaScriptAssignedAndDefaultFunctions(t *testing.T) {
 	entities, language := TreeSitterParser{}.Parse("exports.js", `module.exports = function(value) { return value }
 exports.run = (value) => value
@@ -299,6 +323,14 @@ func TestTreeSitterParserJavaScriptDefaultFunctionDeclarations(t *testing.T) {
 			localName:     "render",
 			signatureWant: "export default function render",
 		},
+		{
+			name:          "anonymous function",
+			path:          "default.js",
+			input:         `export default function(value) { return value }`,
+			language:      "JavaScript",
+			localName:     "",
+			signatureWant: "export default function",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -313,8 +345,10 @@ func TestTreeSitterParserJavaScriptDefaultFunctionDeclarations(t *testing.T) {
 			if seen["default"] != "function" {
 				t.Fatalf("default kind = %q, want function in %#v", seen["default"], entities)
 			}
-			if _, ok := seen[tt.localName]; ok {
-				t.Fatalf("named default export leaked local function entity in %#v", entities)
+			if tt.localName != "" {
+				if _, ok := seen[tt.localName]; ok {
+					t.Fatalf("named default export leaked local function entity in %#v", entities)
+				}
 			}
 			assertEntitySignatureContains(t, entities, "default", tt.signatureWant)
 		})
@@ -352,6 +386,16 @@ func TestTreeSitterParserDefaultClassDeclarations(t *testing.T) {
 			methodKind:   "method",
 			signatureTag: "export default abstract class Base",
 		},
+		{
+			name:         "anonymous javascript class",
+			path:         "view.js",
+			input:        `export default class { render(value) { return value } }`,
+			language:     "JavaScript",
+			localName:    "",
+			methodName:   "default.render",
+			methodKind:   "method",
+			signatureTag: "export default class",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -369,8 +413,10 @@ func TestTreeSitterParserDefaultClassDeclarations(t *testing.T) {
 			if seen[tt.methodName] != tt.methodKind {
 				t.Fatalf("%s kind = %q, want %q in %#v", tt.methodName, seen[tt.methodName], tt.methodKind, entities)
 			}
-			if _, ok := seen[tt.localName]; ok {
-				t.Fatalf("named default export leaked local class entity in %#v", entities)
+			if tt.localName != "" {
+				if _, ok := seen[tt.localName]; ok {
+					t.Fatalf("named default export leaked local class entity in %#v", entities)
+				}
 			}
 			assertEntitySignatureContains(t, entities, "default", tt.signatureTag)
 		})

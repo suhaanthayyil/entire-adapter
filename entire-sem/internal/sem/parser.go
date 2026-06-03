@@ -228,10 +228,14 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 			name = qualify(scope, name)
 		}
 	case "export_statement":
-		if !functionLikeValue(exportDefaultFunctionValue(node, src)) {
+		switch {
+		case functionLikeValue(exportDefaultFunctionValue(node, src)):
+			kind = "function"
+		case validNode(exportDefaultClassValue(node, src)):
+			kind = "class"
+		default:
 			return Entity{}, false
 		}
-		kind = "function"
 		name = "default"
 	default:
 		return Entity{}, false
@@ -376,6 +380,19 @@ func exportDefaultObjectValue(node *sitter.Node, src []byte) *sitter.Node {
 	return nil
 }
 
+func exportDefaultClassValue(node *sitter.Node, src []byte) *sitter.Node {
+	if !strings.HasPrefix(normalize(node.Content(src)), "export default ") {
+		return nil
+	}
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if defaultExportClassDeclaration(child) || child.Type() == "class" {
+			return child
+		}
+	}
+	return nil
+}
+
 func hasNamedChildType(node *sitter.Node, nodeType string) bool {
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
@@ -432,6 +449,10 @@ func signatureFromNode(node *sitter.Node, src []byte) string {
 	start := signatureStartByte(node, src)
 	end := node.EndByte()
 	if value := functionValueForSignature(node, src); functionLikeValue(value) {
+		if bodyStart, ok := functionBodyStart(value); ok {
+			end = bodyStart
+		}
+	} else if value := exportDefaultClassValue(node, src); validNode(value) {
 		if bodyStart, ok := functionBodyStart(value); ok {
 			end = bodyStart
 		}
