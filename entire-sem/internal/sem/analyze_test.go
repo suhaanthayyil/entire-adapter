@@ -119,6 +119,132 @@ func TestAnalyzeGitRangeMultiLineSignatureChange(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangeTypeScriptInterfaceMethodSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `interface Api {
+  validate(value: string): boolean
+}
+
+function check(api: Api, value: string) { return api.validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `interface Api {
+  validate(value: string, strict?: boolean): boolean
+}
+
+function check(api: Api, value: string) { return api.validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "interface signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "Api.validate")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want check() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict?: boolean") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+}
+
+func TestAnalyzeGitRangeTypeScriptTypeLiteralMethodSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "app.ts", `type Api = {
+  validate(value: string): boolean
+}
+
+function check(api: Api, value: string) { return api.validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "app.ts", `type Api = {
+  validate(value: string, strict?: boolean): boolean
+}
+
+function check(api: Api, value: string) { return api.validate(value) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "type literal signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "Api.validate")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want check() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict?: boolean") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+}
+
+func TestAnalyzeGitRangeGoInterfaceMethodSignatureChange(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, "main.go", `package main
+
+type Reader interface { Read(p []byte) (n int, err error) }
+
+func Use(r Reader, p []byte) { _, _ = r.Read(p) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, "main.go", `package main
+
+type Reader interface { Read(p []byte, strict bool) (n int, err error) }
+
+func Use(r Reader, p []byte) { _, _ = r.Read(p) }
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "interface signature change")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := requireChange(t, result, "Reader.Read")
+	if change.Type != "signature_changed" {
+		t.Fatalf("change type = %q, want signature_changed in %#v", change.Type, change)
+	}
+	if change.DependentsCount != 1 {
+		t.Fatalf("dependents = %d, want Use() in %#v", change.DependentsCount, change)
+	}
+	if !strings.Contains(change.NewSignature, "strict bool") {
+		t.Fatalf("new signature missing strict parameter: %#v", change)
+	}
+}
+
 func TestAnalyzeGitRangeArrowFunctionBodyChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")

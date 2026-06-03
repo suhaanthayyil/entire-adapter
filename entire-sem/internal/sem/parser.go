@@ -91,7 +91,7 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 	var kind string
 	var name string
 	switch node.Type() {
-	case "class_definition", "class_declaration":
+	case "class_definition", "class_declaration", "abstract_class_declaration":
 		kind = "class"
 		name = nodeName(node, src)
 	case "function_definition":
@@ -127,9 +127,19 @@ func entityFromNode(node *sitter.Node, src []byte, scope string) (Entity, bool) 
 		if scope != "" {
 			name = qualify(scope, name)
 		}
+	case "method_signature", "abstract_method_signature", "method_elem":
+		if scope == "" {
+			return Entity{}, false
+		}
+		kind = "method"
+		name = nodeName(node, src)
+		name = qualify(scope, name)
 	case "type_spec", "type_alias_declaration":
 		kind = "type"
 		name = nodeName(node, src)
+		if hasNamedChildType(node, "interface_type") || hasNamedChildType(node, "object_type") {
+			kind = "interface"
+		}
 	case "interface_declaration":
 		kind = "interface"
 		name = nodeName(node, src)
@@ -194,6 +204,16 @@ func nodeName(node *sitter.Node, src []byte) string {
 		}
 	}
 	return ""
+}
+
+func hasNamedChildType(node *sitter.Node, nodeType string) bool {
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		child := node.NamedChild(i)
+		if validNode(child) && child.Type() == nodeType {
+			return true
+		}
+	}
+	return false
 }
 
 func isNameNode(nodeType string) bool {

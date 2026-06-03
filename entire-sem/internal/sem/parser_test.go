@@ -110,24 +110,27 @@ func TestTreeSitterParserMultiLanguageEntities(t *testing.T) {
 			input: `package main
 type User struct { Name string }
 type Store[T any] struct { Value T }
+type Reader interface { Read(p []byte) (n int, err error) }
 func (u User) Validate(value string) bool { return value != "" }
 func (s *Store[T]) Load() T { return s.Value }
 func Format() {}
 `,
-			names: []string{"User", "Store", "User.Validate", "Store.Load", "Format"},
+			names: []string{"User", "Store", "Reader", "Reader.Read", "User.Validate", "Store.Load", "Format"},
 		},
 		{
 			path:     "app.ts",
 			language: "TypeScript",
-			input: `interface Foo { value: string }
+			input: `interface Foo { value: string; validate(value: string): boolean }
 type Bar = string
+type Contract = { parse(input: string): number }
+abstract class Base { abstract run(value: string): boolean }
 class User {
   validate(value: string) { return value }
   save = (value: string) => value
 }
 const build = (value: number) => value + 1
 `,
-			names: []string{"Foo", "Bar", "User", "User.validate", "User.save", "build"},
+			names: []string{"Foo", "Foo.validate", "Bar", "Contract", "Contract.parse", "Base", "Base.run", "User", "User.validate", "User.save", "build"},
 		},
 		{
 			path:     "lib.rs",
