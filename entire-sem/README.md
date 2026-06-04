@@ -2,8 +2,8 @@
 
 `entire-sem` is an Entire CLI plugin prototype for entity-level checkpoint context.
 
-Entire already knows a checkpoint touched `auth.py`. This plugin answers the next question:
-which functions, classes, types, or methods changed inside that file?
+Entire already knows a checkpoint touched `auth.py` or `.github/workflows/ci.yml`.
+This plugin answers the next question: which semantic entities changed inside that file?
 
 Once built as `entire-sem` and installed as an Entire plugin, it is invoked as:
 
@@ -25,6 +25,7 @@ The MVP uses a tree-sitter-backed parser for:
 - Python
 - JavaScript / TypeScript
 - Rust, including inherent `impl` methods
+- YAML, including GitHub Actions workflow sections and jobs
 
 The parser is isolated behind `internal/sem`, so the command surface can stay stable
 while the semantic model gets richer.
@@ -87,7 +88,8 @@ checkpoint context at the entity level instead of stopping at "this file changed
 `entire-sem` is a plugin-shaped proof of concept for that idea:
 
 - parse the before and after git trees with tree-sitter
-- extract named entities like functions, classes, methods, structs, traits, and types
+- extract named entities like functions, classes, methods, structs, traits, types,
+  YAML workflow sections, and GitHub Actions jobs
 - compare signatures and normalized bodies
 - build a heuristic dependent count from parsed references in the target tree,
   marking same-short-name method references as ambiguous when they cannot be

@@ -80,6 +80,65 @@ func TestAnalyzeGitRangeDependentCounts(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGitRangeIncludesGitHubWorkflowYAML(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Entire Sem Test")
+	git(t, repo, "config", "user.email", "sem@example.com")
+
+	write(t, repo, ".github/workflows/ci.yml", `name: CI
+on:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: go test ./...
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "initial")
+	base := rev(t, repo, "HEAD")
+
+	write(t, repo, ".github/workflows/ci.yml", `name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: go test -race ./...
+`)
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "update workflow")
+	head := rev(t, repo, "HEAD")
+
+	result, err := AnalyzeGitRange(context.Background(), repo, base, head, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Files) != 1 {
+		t.Fatalf("files = %#v", result.Files)
+	}
+	file := result.Files[0]
+	if file.Path != ".github/workflows/ci.yml" {
+		t.Fatalf("path = %q", file.Path)
+	}
+	if file.Language != "YAML" {
+		t.Fatalf("language = %q", file.Language)
+	}
+	if change := requireChangeKind(t, result, "job", "jobs.test"); change.Type != "body_changed" {
+		t.Fatalf("workflow job change = %#v, want body_changed", change)
+	}
+	if change := requireChangeKind(t, result, "section", "on"); change.Type != "body_changed" {
+		t.Fatalf("workflow trigger change = %#v, want body_changed", change)
+	}
+}
+
 func TestAnalyzeGitRangePythonAssignedLambdaSignatureChange(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
